@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-sand: #faf8f5;
+  --ink-navy: #0f172a;
+  --school-emerald: #059669;
+  --business-amber: #d97706;
+}
+
+body {
+  background-color: var(--bg-sand);
+  color: var(--ink-navy);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}

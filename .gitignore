@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+data/pgdata/
+data/pgdata-test*/
+data/storage/
+data/storage-test*/
+*.log
+.DS_Store
