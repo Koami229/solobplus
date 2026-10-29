@@ -140,7 +140,7 @@ export async function executeGroundedAI<T>(
 ): Promise<AIExecutionResult<T>> {
   const startMs = Date.now();
   const maxPerMin = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 30);
-  enforceRateLimit(`ai:${options.user.id}`, maxPerMin, 60_000);
+  await enforceRateLimit(`ai:${options.user.id}`, maxPerMin, 60_000);
 
   const cleanPrompt = options.prompt?.trim() || '';
   if (cleanPrompt.length < 3) {

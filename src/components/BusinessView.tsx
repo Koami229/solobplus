@@ -1,26 +1,23 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Briefcase,
-  Users,
-  CheckCircle2,
   ClipboardCheck,
   FileSpreadsheet,
   DollarSign,
   ShieldAlert,
-  Search,
   Award,
   Send,
 } from 'lucide-react';
+import { apiFetch } from '@/lib/core/client-http';
 
 interface BusinessViewProps {
   user: any;
-  sessionToken: string | null;
   notify: (msg: string, type?: 'success' | 'error') => void;
 }
 
-export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) {
+export function BusinessView({ user, notify }: BusinessViewProps) {
   const [loading, setLoading] = useState(true);
   const [workspace, setWorkspace] = useState<any>(null);
   const [subTab, setSubTab] = useState<
@@ -51,7 +48,7 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
 
   // Assessment form state (Operator)
   const [assessUserId, setAssessUserId] = useState('');
-  const [assessType, setAssessType] = useState<'LANGUAGE_PROFICIENCY' | 'DOMAIN_SKILL'>('LANGUAGE_PROFICIENCY');
+  const [assessType] = useState<'LANGUAGE_PROFICIENCY' | 'DOMAIN_SKILL'>('LANGUAGE_PROFICIENCY');
   const [assessLang, setAssessLang] = useState('fon');
   const [assessSkill, setAssessSkill] = useState('Orthographe tonale et validation Fɔngbè');
   const [assessScore, setAssessScore] = useState('90');
@@ -71,15 +68,10 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const [deliveryTitle, setDeliveryTitle] = useState('');
   const [deliverySummary, setDeliverySummary] = useState('');
 
-  const authHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-  };
-
-  const fetchBusinessData = async () => {
+  const fetchBusinessData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/business', { headers: authHeaders });
+      const res = await apiFetch('/api/business');
       const data = await res.json();
       if (data.ok && data.workspace) {
         setWorkspace(data.workspace);
@@ -107,18 +99,18 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeSubmissionId, activeTaskId, assignedContributorId, notify, selectedProjectId]);
 
   useEffect(() => {
     fetchBusinessData();
-  }, [sessionToken]);
+  }, [user?.id, fetchBusinessData]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create_project',
           organizationName: orgName,
@@ -149,9 +141,7 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
 
   const handleComputeMatches = async (projectId: string) => {
     try {
-      const res = await fetch(`/api/business?matchProjectId=${encodeURIComponent(projectId)}`, {
-        headers: authHeaders,
-      });
+      const res = await apiFetch(`/api/business?matchProjectId=${encodeURIComponent(projectId)}`);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || 'Erreur lors du calcul de matching');
       setMatchResult(data.matches);
@@ -164,9 +154,9 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const handleRecordAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'record_assessment',
           talentUserId: assessUserId,
@@ -194,9 +184,9 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const handleAssignTask = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create_assign_task',
           projectId: selectedProjectId,
@@ -224,9 +214,9 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const handleSubmitWork = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'submit_work',
           taskId: activeTaskId,
@@ -248,9 +238,9 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const handleReviewSubmission = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'review_submission',
           submissionId: activeSubmissionId,
@@ -272,9 +262,9 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
   const handleFinalizeDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/business', {
+      const res = await apiFetch('/api/business', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'finalize_delivery',
           projectId: selectedProjectId,
@@ -334,7 +324,7 @@ export function BusinessView({ user, sessionToken, notify }: BusinessViewProps) 
           <div className="text-sm">
             <p className="font-semibold">Accès restreint aux rôles SOLOB Business</p>
             <p className="mt-1">
-              Votre rôle actuel (<strong>{user?.role || 'Visiteur'}</strong>) appartient au pilier School ou n&apos;est pas connecté. Basculez sur un compte <code>org_client</code>, <code>operator</code>, <code>contributor</code> ou <code>reviewer</code> dans la barre supérieure pour exécuter les workflows Business.
+              Votre rôle actuel (<strong>{user?.role || 'Visiteur'}</strong>) appartient au pilier School ou n&apos;est pas connecté. Connectez-vous avec un compte <code>org_client</code>, <code>operator</code>, <code>contributor</code> ou <code>reviewer</code> pour exécuter les workflows Business.
             </p>
           </div>
         </div>

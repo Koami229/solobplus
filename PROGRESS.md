@@ -53,3 +53,10 @@
 1. Configure a production `AI_API_KEY` in `.env` to switch `executeGroundedAI()` from `MOCK_DEMO` to `LIVE` mode.
 2. Point `DATABASE_URL` to a managed PostgreSQL 16 instance for multi-node horizontal scaling.
 3. Onboard certified Wolof and Hausa linguistic assessors to expand verified language coverage in `languages_registry`.
+
+## 2026-10-29 — Corrective security audit (branch `security/production-readiness`, merged to `main`)
+- Fixed findings A–F (seed exposure, role escalation, session tokens/localStorage + CSRF, session secret fail-fast, trusted-proxy + PostgreSQL rate limiting, generic errors + real multipart uploads with signature checks and orphan cleanup).
+- Found & fixed duplicate `AppError` class (RBAC errors surfaced as HTTP 500).
+- Tests: 23/23 pass (15 core + 8 security). `npm ci`=0, `npm test`=0, `npm run lint`=0, `npm run build`=0.
+- External PostgreSQL daemon: not available (no postgres/pg_ctl/initdb/docker/psql) → integration test not run.
+- Recommendation: **CONDITIONAL GO for staging / NO-GO for public production** until the external PostgreSQL integration test passes and the trusted proxy configuration is in place.

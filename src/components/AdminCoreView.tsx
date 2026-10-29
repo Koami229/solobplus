@@ -12,19 +12,18 @@ import {
   Activity,
   Cpu,
 } from 'lucide-react';
+import { apiFetch } from '@/lib/core/client-http';
 
 interface AdminCoreViewProps {
   user: any;
   overview: any;
-  sessionToken: string | null;
   notify: (msg: string, type?: 'success' | 'error') => void;
   refreshOverview: () => void;
 }
 
 export function AdminCoreView({
-  user,
+  user: _user,
   overview,
-  sessionToken,
   notify,
   refreshOverview,
 }: AdminCoreViewProps) {
@@ -33,16 +32,11 @@ export function AdminCoreView({
   const [corpusConsent, setCorpusConsent] = useState(false);
   const [exportedPkg, setExportedPkg] = useState<any>(null);
 
-  const authHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-  };
-
   const handleToggleFlag = async (key: string, currentEnabled: boolean) => {
     try {
-      const res = await fetch('/api/admin', {
+      const res = await apiFetch('/api/admin', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'toggle_flag',
           key,
@@ -61,11 +55,11 @@ export function AdminCoreView({
   const handleSavePrivacy = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/auth', {
+      const res = await apiFetch('/api/auth', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'privacy_update',
+          action: 'update_privacy',
           privacyRetentionDays: Number(retentionDays),
           voiceDataConsent: voiceConsent,
           linguisticDataConsent: corpusConsent,
@@ -82,10 +76,10 @@ export function AdminCoreView({
 
   const handleExportData = async () => {
     try {
-      const res = await fetch('/api/auth', {
+      const res = await apiFetch('/api/auth', {
         method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ action: 'data_export' }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'export_data' }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || 'Erreur lors de l’export');
@@ -121,7 +115,7 @@ export function AdminCoreView({
             <div className="text-sm font-bold text-slate-900 mt-1">
               {overview.environmentStatus.databaseEngine}
             </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">PostgreSQL 16 (30 tables actives)</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">PostgreSQL 16 (31 tables actives)</div>
           </div>
 
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -153,7 +147,7 @@ export function AdminCoreView({
             <div className="text-sm font-bold text-slate-900 mt-1">
               {overview.environmentStatus.storageProvider}
             </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Validation MIME + SHA-256</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Validation MIME + Signature + SHA-256</div>
           </div>
         </div>
       )}

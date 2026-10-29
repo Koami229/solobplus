@@ -8,11 +8,21 @@ import {
   loginUser,
   logoutSession,
   registerUser,
+  createNonProductionInternalUser,
   updatePrivacyAndConsent,
 } from '@/lib/core/auth';
 import { enforceRole } from '@/lib/core/rbac';
 import { readAuthorizedFile, uploadAndStoreFile } from '@/lib/core/storage';
+import {
+  checkRateLimit,
+  clearInMemoryRateLimitCacheOnly,
+  extractTrustedClientIp,
+} from '@/lib/core/rate-limit';
 import { resetAllRateLimits } from '@/lib/core/rate-limit';
+import { validateSessionSecretConfig, generateSessionToken } from '@/lib/core/crypto';
+import { handleApiError } from '@/lib/core/http';
+import { bootstrapInitialAdmin, provisionVerifiedUser } from '@/lib/core/auth';
+import { POST as adminPost } from '@/app/api/admin/route';
 import {
   generateRevisionAndExercise,
   getSchoolCatalog,
@@ -38,6 +48,7 @@ import {
   upsertTalentProfile,
 } from '@/lib/business/service';
 import { runSyntheticSeed } from '@/lib/db/seed';
+import { SESSION_COOKIE_NAME, CSRF_COOKIE_NAME, CSRF_HEADER_NAME } from '@/lib/core/http';
 import { POST as authPost } from '@/app/api/auth/route';
 import { POST as schoolPost } from '@/app/api/school/route';
 import { POST as businessPost, GET as businessGet } from '@/app/api/business/route';
@@ -376,7 +387,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       fullName: 'Client 8',
       role: 'org_client',
     });
-    const operator = await registerUser({
+    const operator = await createNonProductionInternalUser({
       email: 'operator8@example.org',
       password: 'StrongPassword!2026',
       fullName: 'Operator 8',
@@ -508,7 +519,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       fullName: 'Client 9',
       role: 'org_client',
     });
-    const operator = await registerUser({
+    const operator = await createNonProductionInternalUser({
       email: 'operator9@example.org',
       password: 'StrongPassword!2026',
       fullName: 'Operator 9',
@@ -520,7 +531,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       fullName: 'Contributor 9',
       role: 'contributor',
     });
-    const reviewer = await registerUser({
+    const reviewer = await createNonProductionInternalUser({
       email: 'reviewer9@example.org',
       password: 'StrongPassword!2026',
       fullName: 'Reviewer 9',
@@ -612,7 +623,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       fullName: 'Other Client',
       role: 'org_client',
     });
-    const operator = await registerUser({
+    const operator = await createNonProductionInternalUser({
       email: 'operator10@example.org',
       password: 'StrongPassword!2026',
       fullName: 'Operator 10',
@@ -703,7 +714,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       fullName: 'Client 11',
       role: 'org_client',
     });
-    const operator = await registerUser({
+    const operator = await createNonProductionInternalUser({
       email: 'operator11@example.org',
       password: 'StrongPassword!2026',
       fullName: 'Operator 11',
@@ -877,14 +888,21 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
     const studentRegRes = await authPost(studentRegReq);
     expect(studentRegRes.status).toBe(201);
     const studentRegData = await studentRegRes.json();
-    const studentToken = studentRegData.sessionToken;
+    expect(studentRegData.sessionToken).toBeUndefined();
+    const setCookies: string[] = (studentRegRes.headers as any).getSetCookie();
+    const cookieVal = (name: string) =>
+      decodeURIComponent((setCookies.find((c) => c.startsWith(name + '=')) || '').split(';')[0].slice(name.length + 1));
+    const studentToken = cookieVal(SESSION_COOKIE_NAME);
+    const studentCsrf = cookieVal(CSRF_COOKIE_NAME);
+    expect(studentToken.length).toBeGreaterThan(10);
 
     // Upload document via /api/school
     const uploadDocReq = new Request('http://localhost:3000/api/school', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${studentToken}`,
+        Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(studentToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(studentCsrf)}`,
+        [CSRF_HEADER_NAME]: studentCsrf,
       },
       body: JSON.stringify({
         action: 'upload_document',
@@ -906,7 +924,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${studentToken}`,
+        Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(studentToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(studentCsrf)}`,
+        [CSRF_HEADER_NAME]: studentCsrf,
       },
       body: JSON.stringify({
         action: 'generate_revision_exercise',
@@ -923,7 +942,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${studentToken}`,
+        Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(studentToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(studentCsrf)}`,
+        [CSRF_HEADER_NAME]: studentCsrf,
       },
       body: JSON.stringify({
         action: 'submit_exercise',
@@ -940,22 +960,13 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
     expect(Number(subExData.submission.score)).toBeGreaterThan(0);
 
     // --- JOURNEY B: SOLOB BUSINESS VIA HTTP ROUTE HANDLERS ---
-    const registerActor = async (email: string, fullName: string, role: string) => {
-      const r = await authPost(
-        new Request('http://localhost:3000/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'register',
-            email,
-            password: 'FreshBusinessPassword#1',
-            fullName,
-            role,
-          }),
-        })
-      );
-      return r.json();
-    };
+    const registerActor = async (email: string, fullName: string, role: string) =>
+      createNonProductionInternalUser({
+        email,
+        password: 'FreshBusinessPassword#1',
+        fullName,
+        role: role as 'org_client' | 'operator' | 'contributor' | 'reviewer',
+      });
 
     const clientActor = await registerActor('client@org.bj', 'Client Org', 'org_client');
     const operatorActor = await registerActor('op@solob.bj', 'Operator SOLOB', 'operator');
@@ -968,7 +979,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${clientActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(clientActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(clientActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: clientActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'create_project',
@@ -993,7 +1005,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${contribActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(contribActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(contribActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: contribActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'upsert_talent_profile',
@@ -1013,7 +1026,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${operatorActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(operatorActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(operatorActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: operatorActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'record_assessment',
@@ -1033,7 +1047,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${operatorActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(operatorActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(operatorActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: operatorActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'create_assign_task',
@@ -1056,7 +1071,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${contribActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(contribActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(contribActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: contribActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'submit_work',
@@ -1074,7 +1090,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${reviewerActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(reviewerActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(reviewerActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: reviewerActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'review_submission',
@@ -1093,7 +1110,8 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${operatorActor.sessionToken}`,
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(operatorActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(operatorActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: operatorActor.csrfToken,
         },
         body: JSON.stringify({
           action: 'finalize_delivery',
@@ -1110,12 +1128,372 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
     const clientReportRes = await businessGet(
       new Request(`http://localhost:3000/api/business?reportId=${report.id}`, {
         method: 'GET',
-        headers: { Authorization: `Bearer ${clientActor.sessionToken}` },
+        headers: { Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(clientActor.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(clientActor.csrfToken)}`,
+          [CSRF_HEADER_NAME]: clientActor.csrfToken },
       })
     );
     expect(clientReportRes.status).toBe(200);
     const clientReportData = await clientReportRes.json();
     expect(clientReportData.report.id).toBe(report.id);
     expect(Number(clientReportData.report.average_quality_score)).toBe(97);
+  });
+
+  // ===========================================================================
+  // SECURITY REGRESSION SUITE (8 tests) — corrective audit findings A–F
+  // ===========================================================================
+  const withEnv = async (vars: Record<string, string | undefined>, fn: () => Promise<void>) => {
+    const prev: Record<string, string | undefined> = {};
+    for (const k of Object.keys(vars)) {
+      prev[k] = process.env[k];
+      if (vars[k] === undefined) delete process.env[k];
+      else process.env[k] = vars[k];
+    }
+    try {
+      await fn();
+    } finally {
+      for (const k of Object.keys(prev)) {
+        if (prev[k] === undefined) delete process.env[k];
+        else process.env[k] = prev[k];
+      }
+    }
+  };
+  const STRONG_SECRET = 'Zq8#xV2!mK9pL4@tR7wN1$bY6&cF3^hJ5*gD0Q';
+  const cookieHeaders = (a: { sessionToken: string; csrfToken: string }) => ({
+    Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(a.sessionToken)}; ${CSRF_COOKIE_NAME}=${encodeURIComponent(a.csrfToken)}`,
+    [CSRF_HEADER_NAME]: a.csrfToken,
+  });
+
+  it('SEC-1. Unauthenticated and non-admin seed_synthetic requests are denied', async () => {
+    const anon = await adminPost(
+      new Request('http://localhost:3000/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'seed_synthetic' }),
+      })
+    );
+    expect(anon.status).toBe(401);
+
+    const student = await registerUser({
+      email: 'sec1.student@example.org',
+      password: 'StrongPassword!2026',
+      fullName: 'Sec One',
+      role: 'student',
+    });
+    const asStudent = await adminPost(
+      new Request('http://localhost:3000/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...cookieHeaders(student) },
+        body: JSON.stringify({ action: 'seed_synthetic' }),
+      })
+    );
+    expect(asStudent.status).toBe(403);
+
+    const db = await ensureDbReady();
+    const synth = await db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM users WHERE email LIKE '%@synthetic.solob.local'`
+    );
+    expect(Number(synth.rows[0].count)).toBe(0);
+  });
+
+  it('SEC-2. Production mode cannot seed, create fixture users, or log in to synthetic privileged accounts', async () => {
+    await runSyntheticSeed(); // seeded while still in test mode
+    await withEnv({ NODE_ENV: 'production', SESSION_SECRET: STRONG_SECRET }, async () => {
+      await expect(runSyntheticSeed()).rejects.toThrow(/strictly forbidden in production/i);
+      await expect(
+        createNonProductionInternalUser({
+          email: 'x@example.org',
+          password: 'StrongPassword!2026',
+          fullName: 'X',
+          role: 'admin',
+        })
+      ).rejects.toThrow(/forbidden in production/i);
+      await expect(
+        loginUser({ email: 'admin.core@synthetic.solob.local', password: 'SolobSynthetic#2026' })
+      ).rejects.toThrow();
+      const res = await adminPost(
+        new Request('http://localhost:3000/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'seed_synthetic' }),
+        })
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('SEC-3. Public registration rejects privileged roles; one-time admin bootstrap and provisioning are enforced', async () => {
+    for (const role of ['admin', 'operator', 'reviewer', 'teacher']) {
+      await expect(
+        registerUser({
+          email: `esc.${role}@example.org`,
+          password: 'StrongPassword!2026',
+          fullName: 'Escalation Attempt',
+          role,
+        })
+      ).rejects.toThrow(/forbidden/i);
+      const httpRes = await authPost(
+        new Request('http://localhost:3000/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'register',
+            email: `esc.http.${role}@example.org`,
+            password: 'StrongPassword!2026',
+            fullName: 'Escalation Attempt',
+            role,
+          }),
+        })
+      );
+      expect(httpRes.status).toBe(403);
+    }
+    const db = await ensureDbReady();
+    const priv = await db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM users WHERE role IN ('admin','operator','reviewer','teacher')`
+    );
+    expect(Number(priv.rows[0].count)).toBe(0);
+
+    await expect(
+      bootstrapInitialAdmin({ email: 'root@example.org', password: 'short', fullName: 'Root' })
+    ).rejects.toThrow(/at least 12/i);
+    const admin = await bootstrapInitialAdmin({
+      email: 'root@example.org',
+      password: 'Vr7#kP2!qZ9@wL4m',
+      fullName: 'Root Admin',
+    });
+    expect(admin.role).toBe('admin');
+    await expect(
+      bootstrapInitialAdmin({ email: 'root2@example.org', password: 'Vr7#kP2!qZ9@wL4m', fullName: 'Root Two' })
+    ).rejects.toThrow(/already exists/i);
+
+    const student = await registerUser({
+      email: 'sec3.student@example.org',
+      password: 'StrongPassword!2026',
+      fullName: 'Student',
+      role: 'student',
+    });
+    await expect(
+      provisionVerifiedUser(student.user, {
+        email: 'sneaky@example.org',
+        password: 'StrongPassword!2026',
+        fullName: 'Sneaky',
+        role: 'operator',
+      })
+    ).rejects.toThrow();
+    const teacher = await provisionVerifiedUser(admin, {
+      email: 'teacher.ok@example.org',
+      password: 'StrongPassword!2026',
+      fullName: 'Verified Teacher',
+      role: 'teacher',
+    });
+    expect(teacher.user.role).toBe('teacher');
+  });
+
+  it('SEC-4. Session tokens are never in JSON or client storage; cookies are HttpOnly/SameSite; CSRF, expiry and revocation work', async () => {
+    const res = await authPost(
+      new Request('http://localhost:3000/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'register',
+          email: 'sec4@example.org',
+          password: 'StrongPassword!2026',
+          fullName: 'Sec Four',
+          role: 'student',
+        }),
+      })
+    );
+    expect(res.status).toBe(201);
+    const text = await res.clone().text();
+    const body = JSON.parse(text);
+    expect(body.sessionToken).toBeUndefined();
+    const setCookies: string[] = (res.headers as any).getSetCookie();
+    const sessionCookie = setCookies.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))!;
+    expect(sessionCookie).toMatch(/HttpOnly/i);
+    expect(sessionCookie).toMatch(/SameSite=lax|SameSite=strict/i);
+    expect(sessionCookie).toMatch(/Path=\//);
+    expect(sessionCookie).toMatch(/Expires=|Max-Age=/i);
+    const rawToken = decodeURIComponent(sessionCookie.split(';')[0].slice(SESSION_COOKIE_NAME.length + 1));
+    expect(text).not.toContain(rawToken);
+
+    // No client source persists tokens in localStorage/sessionStorage
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+        d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]
+      );
+    for (const f of walk(path.resolve('src')).filter((f) => /\.(tsx?|jsx?)$/.test(f))) {
+      const src = fs.readFileSync(f, 'utf8');
+      expect(src, f).not.toMatch(/localStorage|sessionStorage/);
+    }
+
+    // CSRF: cookie-authenticated POST without header is rejected; cross-origin rejected
+    const login = await loginUser({ email: 'sec4@example.org', password: 'StrongPassword!2026' });
+    const noHeader = await schoolPost(
+      new Request('http://localhost:3000/api/school', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(login.sessionToken)}`,
+        },
+        body: JSON.stringify({ action: 'request_explanation', question: 'Q?' }),
+      })
+    );
+    expect(noHeader.status).toBe(403);
+    const crossOrigin = await schoolPost(
+      new Request('http://localhost:3000/api/school', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example', ...cookieHeaders(login) },
+        body: JSON.stringify({ action: 'request_explanation', question: 'Q?' }),
+      })
+    );
+    expect(crossOrigin.status).toBe(403);
+
+    // Unauthorized / forged / expired / revoked tokens resolve to null
+    expect(await authenticateSessionToken(generateSessionToken().rawToken)).toBeNull();
+    expect(await authenticateSessionToken('garbage')).toBeNull();
+    const db = await ensureDbReady();
+    expect((await authenticateSessionToken(login.sessionToken))?.email).toBe('sec4@example.org');
+    await db.query(`UPDATE sessions SET expires_at = NOW() - INTERVAL '1 minute'`);
+    expect(await authenticateSessionToken(login.sessionToken)).toBeNull();
+    const fresh = await loginUser({ email: 'sec4@example.org', password: 'StrongPassword!2026' });
+    expect(await authenticateSessionToken(fresh.sessionToken)).not.toBeNull();
+    await logoutSession(fresh.sessionToken);
+    expect(await authenticateSessionToken(fresh.sessionToken)).toBeNull();
+  });
+
+  it('SEC-5. Missing, placeholder, or weak production SESSION_SECRET fails fast; a strong secret is accepted', async () => {
+    expect(() => validateSessionSecretConfig(undefined, 'production')).toThrow(/missing/i);
+    expect(() => validateSessionSecretConfig('', 'production')).toThrow(/missing/i);
+    expect(() =>
+      validateSessionSecretConfig('replace_with_64_char_hex_session_secret_do_not_commit', 'production')
+    ).toThrow();
+    expect(() => validateSessionSecretConfig('short', 'production')).toThrow(/32 bytes/i);
+    expect(() => validateSessionSecretConfig('a'.repeat(64), 'production')).toThrow(/entropy/i);
+    expect(validateSessionSecretConfig(STRONG_SECRET, 'production')).toBe(STRONG_SECRET);
+    // Startup path (DB readiness) also fails fast
+    await withEnv({ NODE_ENV: 'production', SESSION_SECRET: undefined }, async () => {
+      await expect(resetDbInstanceForTests('memory://')).rejects.toThrow(/SESSION_SECRET/);
+    });
+  });
+
+  it('SEC-6. Rate limits ignore spoofed X-Forwarded-For, honour trusted proxy, throttle register/login, and persist in PostgreSQL across instances', async () => {
+    await withEnv({ TRUST_PROXY: undefined }, async () => {
+      const a = new Request('http://localhost:3000/api/auth', { headers: { 'X-Forwarded-For': '9.9.9.9' } });
+      const b = new Request('http://localhost:3000/api/auth', { headers: { 'X-Forwarded-For': '8.8.8.8' } });
+      expect(extractTrustedClientIp(a)).toBe(extractTrustedClientIp(b));
+      expect(extractTrustedClientIp(a)).not.toContain('9.9.9.9');
+      expect(extractTrustedClientIp(a)).not.toBe('127.0.0.1');
+    });
+    await withEnv({ TRUST_PROXY: 'true', TRUSTED_PROXY_HOPS: '1', TRUSTED_PROXY_SECRET: undefined }, async () => {
+      const r = new Request('http://localhost:3000/api/auth', {
+        headers: { 'X-Forwarded-For': '1.2.3.4, 41.202.219.55' },
+      });
+      expect(extractTrustedClientIp(r)).toBe('proxy-ip:41.202.219.55');
+    });
+
+    // Distributed: bucket state lives in PostgreSQL, survives local cache loss
+    const key = 'test:distributed:41.202.219.55';
+    expect((await checkRateLimit({ key, maxRequests: 2, windowMs: 60_000 })).allowed).toBe(true);
+    clearInMemoryRateLimitCacheOnly();
+    expect((await checkRateLimit({ key, maxRequests: 2, windowMs: 60_000 })).allowed).toBe(true);
+    clearInMemoryRateLimitCacheOnly();
+    expect((await checkRateLimit({ key, maxRequests: 2, windowMs: 60_000 })).allowed).toBe(false);
+
+    // Registration throttle (5 per email/min) and login throttle (10 per email/min)
+    let registerBlocked = false;
+    for (let i = 0; i < 8; i++) {
+      try {
+        await registerUser({ email: 'throttle@example.org', password: 'bad', fullName: 'T', role: 'student' }, 'ip-a');
+      } catch (e: any) {
+        if (e.statusCode === 429) registerBlocked = true;
+      }
+    }
+    expect(registerBlocked).toBe(true);
+    let loginBlocked = false;
+    for (let i = 0; i < 14; i++) {
+      try {
+        await loginUser({ email: 'nobody@example.org', password: 'WrongPassword!1' }, `ip-${i}`);
+      } catch (e: any) {
+        if (e.statusCode === 429) loginBlocked = true;
+      }
+    }
+    expect(loginBlocked).toBe(true);
+  });
+
+  it('SEC-7. Internal errors are generic and failed DB persistence leaves no orphaned files', async () => {
+    const res = handleApiError(
+      new Error('SELECT password_hash FROM users failed at /workspace/solob-plus/src/lib/db/index.ts SESSION_SECRET=s3cr3t')
+    );
+    expect(res.status).toBe(500);
+    const txt = await res.text();
+    expect(JSON.parse(txt).error.code).toBe('INTERNAL_SERVER_ERROR');
+    for (const leak of ['password_hash', '/workspace', 's3cr3t', 'SELECT', 'stack']) {
+      expect(txt).not.toContain(leak);
+    }
+
+    const owner = await registerUser({
+      email: 'sec7@example.org',
+      password: 'StrongPassword!2026',
+      fullName: 'Sec Seven',
+      role: 'student',
+    });
+    const root = path.resolve(process.env.LOCAL_STORAGE_DIR!);
+    const countFiles = (d: string): number =>
+      !fs.existsSync(d)
+        ? 0
+        : fs.readdirSync(d, { withFileTypes: true }).reduce(
+            (n, e) => n + (e.isDirectory() ? countFiles(path.join(d, e.name)) : 1),
+            0
+          );
+    const before = countFiles(root);
+    await expect(
+      uploadAndStoreFile({
+        user: owner.user,
+        pillar: 'school',
+        originalName: 'orphan.txt',
+        mimeType: 'text/plain',
+        content: 'must be cleaned up',
+        simulateDbFailure: true,
+      })
+    ).rejects.toThrow();
+    expect(countFiles(root)).toBe(before);
+  });
+
+  it('SEC-8. Real multipart binary uploads (.txt and signed .pdf) work end-to-end; forged PDFs are rejected', async () => {
+    const reg = await createNonProductionInternalUser({
+      email: 'sec8@example.org',
+      password: 'StrongPassword!2026',
+      fullName: 'Sec Eight',
+      role: 'student',
+    });
+    const send = async (file: File) => {
+      const fd = new FormData();
+      fd.set('action', 'upload_document');
+      fd.set('title', `Doc ${file.name}`);
+      fd.set('file', file);
+      return schoolPost(
+        new Request('http://localhost:3000/api/school', {
+          method: 'POST',
+          headers: cookieHeaders(reg),
+          body: fd,
+        })
+      );
+    };
+    const txt = await send(
+      new File(['La photosynthèse se déroule dans le chloroplaste et produit du glucose.'], 'cours.txt', {
+        type: 'text/plain',
+      })
+    );
+    expect(txt.status).toBe(201);
+    const pdfBytes = Buffer.from(
+      '%PDF-1.4\n1 0 obj<<>>endobj\nBT (Loi de Newton F = m a) Tj ET\ntrailer<<>>\n%%EOF',
+      'latin1'
+    );
+    const pdf = await send(new File([pdfBytes], 'cours.pdf', { type: 'application/pdf' }));
+    expect(pdf.status).toBe(201);
+    const fake = await send(new File(['not really a pdf'], 'fake.pdf', { type: 'application/pdf' }));
+    expect(fake.status).toBe(400);
+    const exe = await send(new File([Buffer.from([0x4d, 0x5a, 0x90, 0x00])], 'evil.exe', { type: 'application/octet-stream' }));
+    expect(exe.status).toBeGreaterThanOrEqual(400);
+    expect(exe.status).toBeLessThan(500);
   });
 });

@@ -1,84 +1,79 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen,
   Upload,
   Sparkles,
   CheckCircle2,
-  AlertTriangle,
+  AlertCircle,
   FileText,
   GraduationCap,
-  CheckSquare,
-  History,
+  Award,
   ShieldAlert,
 } from 'lucide-react';
+import { apiFetch } from '@/lib/core/client-http';
 
 interface SchoolViewProps {
   user: any;
-  sessionToken: string | null;
   notify: (msg: string, type?: 'success' | 'error') => void;
 }
 
-export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
+export function SchoolView({ user, notify }: SchoolViewProps) {
   const [loading, setLoading] = useState(true);
-  const [catalog, setCatalog] = useState<any>({ curricula: [], levels: [], subjects: [], languages: [] });
+  const [catalog, setCatalog] = useState<any>({ curricula: [], subjects: [], gradeLevels: [] });
   const [workspace, setWorkspace] = useState<any>(null);
-  const [subTab, setSubTab] = useState<'profile' | 'library' | 'tutor' | 'exercises' | 'history'>('profile');
+  const [subTab, setSubTab] = useState<'profile' | 'documents' | 'tutor' | 'exercises' | 'progress'>('documents');
 
-  // Profile form state
-  const [country, setCountry] = useState('BJ');
-  const [curriculumId, setCurriculumId] = useState('cur_bj_bac');
-  const [levelId, setLevelId] = useState('lvl_bj_tle_cd');
-  const [subjectId, setSubjectId] = useState('sub_bj_svt');
-  const [institutionName, setInstitutionName] = useState('');
+  // Academic profile form state
+  const [countryCode, setCountryCode] = useState('BJ');
+  const [curriculumId, setCurriculumId] = useState('curr_bj_bac');
+  const [gradeLevelId, setGradeLevelId] = useState('gl_bj_tle_cd');
+  const [schoolName, setSchoolName] = useState('');
+  const [examTargetYear, setExamTargetYear] = useState(2027);
   const [learningGoals, setLearningGoals] = useState('');
 
-  // Document upload state
+  // Document upload form state (supports real file selection + optional text entry)
   const [docTitle, setDocTitle] = useState('');
-  const [docFileName, setDocFileName] = useState('notes_cours_svt.txt');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [docFileName, setDocFileName] = useState('cours_physique_induction.txt');
   const [docContent, setDocContent] = useState('');
-  const [isTeacherResource, setIsTeacherResource] = useState(false);
+  const [docSubjectId, setDocSubjectId] = useState('subj_bj_phys');
 
-  // AI Tutor state
+  // Grounded AI Tutor state
   const [selectedDocId, setSelectedDocId] = useState('');
-  const [question, setQuestion] = useState('');
-  const [latestExplanation, setLatestExplanation] = useState<any>(null);
+  const [tutorQuestion, setTutorQuestion] = useState('');
+  const [tutorLoading, setTutorLoading] = useState(false);
+  const [latestTutorTurn, setLatestTutorTurn] = useState<any>(null);
 
-  // Exercise generator & submission state
-  const [genTitle, setGenTitle] = useState('');
-  const [genDifficulty, setGenDifficulty] = useState<'FOUNDATION' | 'INTERMEDIATE' | 'EXAM_LEVEL'>('EXAM_LEVEL');
-  const [genMaterialType, setGenMaterialType] = useState<'SUMMARY' | 'FLASHCARDS' | 'QUIZ' | 'EXAM_PREP' | 'FACT_CHECK'>('EXAM_PREP');
-  const [activeExerciseId, setActiveExerciseId] = useState('');
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [latestCorrection, setLatestCorrection] = useState<any>(null);
+  // Exercise generation & submission state
+  const [genTitle, setGenTitle] = useState('Fiche de Révision & Exercice : Induction Électromagnétique');
+  const [genDifficulty, setGenDifficulty] = useState<'EASY' | 'MEDIUM' | 'EXAM_LEVEL'>('EXAM_LEVEL');
+  const [activeExercise, setActiveExercise] = useState<any>(null);
+  const [answersMap, setAnswersMap] = useState<Record<string, string>>({});
+  const [latestSubmissionResult, setLatestSubmissionResult] = useState<any>(null);
 
-  const authHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-  };
-
-  const fetchSchoolData = async () => {
+  const fetchSchoolData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/school', { headers: authHeaders });
+      const res = await apiFetch('/api/school');
       const data = await res.json();
       if (data.ok) {
         setCatalog(data.catalog);
         setWorkspace(data.workspace);
         if (data.workspace?.profile) {
-          setCountry(data.workspace.profile.country || 'BJ');
-          setCurriculumId(data.workspace.profile.curriculum_id || 'cur_bj_bac');
-          setLevelId(data.workspace.profile.level_id || 'lvl_bj_tle_cd');
-          setSubjectId(data.workspace.profile.primary_subject_id || 'sub_bj_svt');
-          setInstitutionName(data.workspace.profile.institution_name || '');
+          setCountryCode(data.workspace.profile.country_code || 'BJ');
+          setCurriculumId(data.workspace.profile.curriculum_id || 'curr_bj_bac');
+          setGradeLevelId(data.workspace.profile.grade_level_id || 'gl_bj_tle_cd');
+          setSchoolName(data.workspace.profile.school_name || '');
+          setExamTargetYear(data.workspace.profile.exam_target_year || 2027);
           setLearningGoals(data.workspace.profile.learning_goals || '');
         }
         if (data.workspace?.documents?.length > 0 && !selectedDocId) {
           setSelectedDocId(data.workspace.documents[0].id);
         }
-        if (data.workspace?.exercises?.length > 0 && !activeExerciseId) {
-          setActiveExerciseId(data.workspace.exercises[0].id);
+        if (data.workspace?.exercises?.length > 0 && !activeExercise) {
+          setActiveExercise(data.workspace.exercises[0]);
         }
       }
     } catch (err: any) {
@@ -86,59 +81,90 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeExercise, notify, selectedDocId]);
 
   useEffect(() => {
     fetchSchoolData();
-  }, [sessionToken]);
+  }, [user?.id, fetchSchoolData]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/school', {
+      const res = await apiFetch('/api/school', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'upsert_profile',
-          country,
+          countryCode,
           curriculumId,
-          levelId,
-          primarySubjectId: subjectId,
-          institutionName,
+          gradeLevelId,
+          schoolName,
+          examTargetYear: Number(examTargetYear),
           learningGoals,
         }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error?.message || 'Échec de sauvegarde');
-      notify('Profil académique enregistré avec succès !');
+      if (!data.ok) throw new Error(data.error?.message || 'Erreur de sauvegarde');
+      notify('Profil académique mis à jour et persisté en base !');
       fetchSchoolData();
     } catch (err: any) {
       notify(err.message, 'error');
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedFile(file);
+    if (file) {
+      setDocFileName(file.name);
+      if (!docTitle.trim()) {
+        setDocTitle(file.name.replace(/\.[^.]+$/, ''));
+      }
+    }
+  };
+
   const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/school', {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({
-          action: 'upload_document',
-          title: docTitle,
-          originalFileName: docFileName,
-          mimeType: 'text/plain',
-          content: docContent,
-          curriculumId,
-          subjectId,
-          isTeacherResource,
-        }),
-      });
+      let res: Response;
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.set('action', 'upload_document');
+        formData.set('title', docTitle);
+        formData.set('file', selectedFile);
+        formData.set('originalFileName', selectedFile.name);
+        formData.set('mimeType', selectedFile.type || '');
+        formData.set('curriculumId', curriculumId);
+        formData.set('subjectId', docSubjectId);
+        formData.set('isTeacherResource', String(user?.role === 'teacher'));
+
+        res = await apiFetch('/api/school', {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        res = await apiFetch('/api/school', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload_document',
+            title: docTitle,
+            originalFileName: docFileName,
+            mimeType: 'text/plain',
+            content: docContent,
+            curriculumId,
+            subjectId: docSubjectId,
+            isTeacherResource: user?.role === 'teacher',
+          }),
+        });
+      }
+
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || 'Échec du téléversement');
-      notify(`Document "${data.document.title}" validé et extrait (${data.document.word_count} mots).`);
+      notify(`Document "${data.document.title}" téléversé et indexé avec succès !`);
       setDocTitle('');
       setDocContent('');
+      setSelectedFile(null);
       setSelectedDocId(data.document.id);
       fetchSchoolData();
     } catch (err: any) {
@@ -146,78 +172,94 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
     }
   };
 
-  const handleAskTutor = async (e: React.FormEvent) => {
+  const handleAskGroundedTutor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedDocId) {
+      notify('Veuillez sélectionner un document source pour ancrer la réponse.', 'error');
+      return;
+    }
     try {
-      const res = await fetch('/api/school', {
+      setTutorLoading(true);
+      const res = await apiFetch('/api/school', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'explain_grounded',
-          documentId: selectedDocId || null,
-          subjectId,
-          question,
+          documentId: selectedDocId,
+          subjectId: docSubjectId,
+          question: tutorQuestion,
         }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error?.message || 'Erreur lors de la requête IA');
-      setLatestExplanation(data.aiResult);
-      notify('Explication académique générée et ancrée dans les sources.');
+      if (!data.ok) throw new Error(data.error?.message || 'Erreur du tuteur IA');
+      setLatestTutorTurn(data);
+      notify('Explication sourcée générée avec vérification des citations !');
       fetchSchoolData();
     } catch (err: any) {
       notify(err.message, 'error');
+    } finally {
+      setTutorLoading(false);
     }
   };
 
   const handleGenerateExercise = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedDocId) {
+      notify('Sélectionnez un document de cours pour générer la fiche et les exercices.', 'error');
+      return;
+    }
     try {
-      const res = await fetch('/api/school', {
+      setTutorLoading(true);
+      const res = await apiFetch('/api/school', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generate_revision_exercise',
-          documentId: selectedDocId || null,
-          subjectId,
-          title: genTitle || 'Synthèse & Exercice de révision',
+          documentId: selectedDocId,
+          subjectId: docSubjectId,
+          title: genTitle,
           difficulty: genDifficulty,
-          materialType: genMaterialType,
+          materialType: 'SUMMARY_SHEET',
         }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || 'Erreur de génération');
-      setActiveExerciseId(data.exercise.id);
-      setGenTitle('');
-      notify('Fiche de révision et exercice générés avec succès !');
+      setActiveExercise(data.exercise);
+      setAnswersMap({});
+      setLatestSubmissionResult(null);
+      notify('Fiche de révision et exercice générés avec barème officiel !');
       fetchSchoolData();
     } catch (err: any) {
       notify(err.message, 'error');
+    } finally {
+      setTutorLoading(false);
     }
   };
 
   const handleSubmitExercise = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!activeExercise) return;
     try {
-      const res = await fetch('/api/school', {
+      const res = await apiFetch('/api/school', {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'submit_exercise',
-          exerciseId: activeExerciseId,
-          answers,
+          exerciseId: activeExercise.id,
+          answers: answersMap,
         }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || 'Erreur de soumission');
-      setLatestCorrection(data.submission);
-      notify(`Exercice corrigé : ${data.submission.score}/${data.submission.max_score} (${data.submission.percentage}%)`);
+      setLatestSubmissionResult(data.submission);
+      notify(
+        `Exercice corrigé : ${data.submission.score}/${data.submission.max_score} (${data.submission.percentage}%) !`
+      );
       fetchSchoolData();
     } catch (err: any) {
       notify(err.message, 'error');
     }
   };
-
-  const activeExercise = workspace?.exercises?.find((ex: any) => ex.id === activeExerciseId);
 
   return (
     <div className="space-y-6">
@@ -227,40 +269,49 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 text-xs font-semibold mb-2">
               <GraduationCap className="w-4 h-4" />
-              SOLOB SCHOOL — APPRENTISSAGE ACADÉMIQUE UNIQUEMENT
+              SOLOB SCHOOL — APPRENTISSAGE ACADÉMIQUE & TUTEUR IA ANCRÉ
             </div>
-            <h2 className="text-2xl font-bold">Espace Académique Élève, Étudiant & Enseignant</h2>
+            <h2 className="text-2xl font-bold">Espace Apprenant & Enseignant</h2>
             <p className="text-emerald-200 text-sm mt-1">
-              Programmes configurables (Bénin BAC/BEPC, WAEC, UEMOA). IA explicable avec ancrage documentaire, indicateur d&apos;incertitude et zéro citation inventée.
+              Ancrage documentaire strict, citations vérifiables, niveau d&apos;incertitude épistémique et alignement sur les programmes officiels (BAC Bénin, WAEC/WASSCE, UEMOA).
             </p>
           </div>
           {workspace?.progressSummary && (
-            <div className="grid grid-cols-3 gap-3 bg-emerald-900/60 p-3 rounded-xl border border-emerald-700/60 text-center">
+            <div className="grid grid-cols-3 gap-3 bg-emerald-900/70 p-3 rounded-xl border border-emerald-700/60 text-center">
               <div>
-                <div className="text-xl font-bold text-emerald-300">{workspace.progressSummary.documentsUploaded}</div>
-                <div className="text-[11px] text-emerald-200">Cours Extraits</div>
+                <div className="text-xl font-bold text-emerald-300">
+                  {workspace.progressSummary.totalDocuments}
+                </div>
+                <div className="text-[11px] text-emerald-200">Documents</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-emerald-300">{workspace.progressSummary.exercisesCompleted}</div>
-                <div className="text-[11px] text-emerald-200">Copies Corrigées</div>
+                <div className="text-xl font-bold text-emerald-300">
+                  {workspace.progressSummary.totalExercisesCompleted}
+                </div>
+                <div className="text-[11px] text-emerald-200">Exercices Corrigés</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-emerald-300">{workspace.progressSummary.averageScorePercentage}%</div>
-                <div className="text-[11px] text-emerald-200">Moyenne</div>
+                <div className="text-xl font-bold text-emerald-300">
+                  {workspace.progressSummary.averageScorePercentage}%
+                </div>
+                <div className="text-[11px] text-emerald-200">Score Moyen</div>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Role Access Warning if Business user tries to view School */}
+      {/* Role Warning if Business user tries to access School */}
       {(!user || !['student', 'teacher', 'admin'].includes(user.role)) && (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3 text-amber-900">
           <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-sm">
-            <p className="font-semibold">Séparation stricte des permissions School / Business</p>
+            <p className="font-semibold">Accès en lecture au catalogue School uniquement</p>
             <p className="mt-1">
-              Vous êtes actuellement connecté avec le rôle <strong>{user?.role || 'Visiteur non connecté'}</strong>. Seuls les rôles <code>student</code>, <code>teacher</code> et <code>admin</code> sont autorisés par le serveur à enregistrer des activités académiques dans SOLOB School. Utilisez le sélecteur de compte en haut pour basculer sur un profil Élève ou Enseignant.
+              Vous êtes actuellement connecté avec le rôle{' '}
+              <code className="font-mono font-bold">{user?.role || 'visiteur non connecté'}</code>.
+              La séparation stricte RBAC de SOLOB+ réserve l&apos;espace de travail School aux rôles{' '}
+              <code>student</code>, <code>teacher</code> et <code>admin</code>.
             </p>
           </div>
         </div>
@@ -269,11 +320,11 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
       {/* Sub-navigation */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         {[
-          { id: 'profile', label: '1. Profil & Programme', icon: GraduationCap },
-          { id: 'library', label: '2. Bibliothèque & Upload Document', icon: Upload },
-          { id: 'tutor', label: '3. Tuteur IA Ancré & Fact-Check', icon: Sparkles },
-          { id: 'exercises', label: '4. Révisions, Exercices & Corrections', icon: CheckSquare },
-          { id: 'history', label: '5. Historique & Progression', icon: History },
+          { id: 'documents', label: '1. Bibliothèque & Téléversement de Cours', icon: Upload },
+          { id: 'tutor', label: '2. Tuteur IA Ancré & Vérificateur de Citations', icon: Sparkles },
+          { id: 'exercises', label: '3. Fiches de Révision & Exercices Notés', icon: BookOpen },
+          { id: 'progress', label: '4. Suivi de Progression & Historique', icon: Award },
+          { id: 'profile', label: '5. Programme Officiel & Profil Académique', icon: GraduationCap },
         ].map((t) => {
           const Icon = t.icon;
           return (
@@ -299,267 +350,203 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
         </div>
       ) : (
         <>
-          {/* TAB 1: PROFILE & CURRICULUM */}
-          {subTab === 'profile' && (
+          {/* TAB 1: DOCUMENTS */}
+          {subTab === 'documents' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <form onSubmit={handleSaveProfile} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <form
+                onSubmit={handleUploadDocument}
+                className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4"
+              >
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <GraduationCap className="w-5 h-5 text-emerald-600" />
-                  Configurer mon Profil Académique
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Pays</label>
-                    <select
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    >
-                      <option value="BJ">Bénin (BJ)</option>
-                      <option value="NG">Nigéria (NG)</option>
-                      <option value="SN">Sénégal (SN)</option>
-                      <option value="TG">Togo (TG)</option>
-                      <option value="CI">Côte d&apos;Ivoire (CI)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Établissement Scolaire / Université</label>
-                    <input
-                      type="text"
-                      value={institutionName}
-                      onChange={(e) => setInstitutionName(e.target.value)}
-                      placeholder="Ex: CEG Gbégamey / UAC"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Programme Officiel (Curriculum)</label>
-                  <select
-                    value={curriculumId}
-                    onChange={(e) => setCurriculumId(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    {catalog.curricula.map((c: any) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.verified ? '✓ [VÉRIFIÉ]' : '⚠ [NON VÉRIFIÉ]'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Classe / Niveau</label>
-                    <select
-                      value={levelId}
-                      onChange={(e) => setLevelId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    >
-                      {catalog.levels.map((l: any) => (
-                        <option key={l.id} value={l.id}>
-                          {l.name} {l.verified ? '(Vérifié)' : '(Non vérifié)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Matière Principale</label>
-                    <select
-                      value={subjectId}
-                      onChange={(e) => setSubjectId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    >
-                      {catalog.subjects.map((s: any) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} {s.verified ? '✓' : '⚠ (Non vérifié)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Objectifs d&apos;étude et d&apos;examen</label>
-                  <textarea
-                    rows={3}
-                    value={learningGoals}
-                    onChange={(e) => setLearningGoals(e.target.value)}
-                    placeholder="Ex: Maîtriser la synthèse des protéines et réussir l'épreuve de SVT du BAC D..."
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
-                >
-                  Enregistrer le Profil Académique
-                </button>
-              </form>
-
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                <h3 className="text-lg font-bold text-slate-900">État de Couverture des Programmes & Langues</h3>
-                <p className="text-xs text-slate-600">
-                  Conformément à la charte SOLOB+, nous ne prétendons jamais couvrir tous les programmes africains sans vérification. Tout programme non validé est clairement signalé.
-                </p>
-                <div className="space-y-3">
-                  {catalog.curricula.map((c: any) => (
-                    <div key={c.id} className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-sm text-slate-900">{c.name}</div>
-                        <div className="text-xs text-slate-600 mt-0.5">{c.description}</div>
-                      </div>
-                      <span
-                        className={`shrink-0 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                          c.verified
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : 'bg-amber-100 text-amber-800 border border-amber-300'
-                        }`}
-                      >
-                        {c.verified ? 'VÉRIFIÉ' : 'NON VÉRIFIÉ'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                {workspace?.profile && (
-                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 mt-4">
-                    <div className="text-xs font-bold uppercase text-emerald-800">Profil Actif Enregistré</div>
-                    <div className="text-sm font-semibold text-slate-900 mt-1">
-                      {workspace.profile.curriculum_name} — {workspace.profile.level_name}
-                    </div>
-                    <div className="text-xs text-slate-700 mt-1">
-                      Matière : <strong>{workspace.profile.subject_name}</strong> | Établissement :{' '}
-                      {workspace.profile.institution_name || 'Non spécifié'}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: LIBRARY & UPLOAD */}
-          {subTab === 'library' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <form onSubmit={handleUploadDocument} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-emerald-600" />
-                  Téléverser & Extraire un Document de Cours Autorisé
+                  <Upload className="w-5 h-5 text-emerald-700" />
+                  Téléverser un Document de Cours ou Polycopié
                 </h3>
                 <p className="text-xs text-slate-600">
-                  Stockage privé sécurisé avec contrôle MIME, taille maximale et somme de contrôle SHA-256.
+                  Sélectionnez un fichier réel depuis votre disque (<code>.pdf</code>,{' '}
+                  <code>.txt</code>, <code>.md</code>, <code>.csv</code>, <code>.json</code>) ou
+                  collez directement le texte du cours. Chaque fichier est vérifié (signature binaire,
+                  MIME, taille, anti-exécutable) et stocké hors du répertoire public.
                 </p>
+
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Titre du Document Académique</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Titre du document
+                  </label>
                   <input
                     type="text"
                     required
                     value={docTitle}
                     onChange={(e) => setDocTitle(e.target.value)}
-                    placeholder="Ex: Cours de Génétique — Transcription et Traduction (Terminale D)"
+                    placeholder="Ex: Chapitre 4 — Loi de Faraday et Induction (Terminale C)"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nom de fichier (.txt, .md)</label>
-                  <input
-                    type="text"
-                    required
-                    value={docFileName}
-                    onChange={(e) => setDocFileName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Contenu textuel du document (extrait pour l&apos;ancrage des réponses IA)
+                    Sélectionner un fichier depuis votre appareil (.pdf, .txt, .md, .csv, .json)
                   </label>
-                  <textarea
-                    rows={6}
-                    required
-                    value={docContent}
-                    onChange={(e) => setDocContent(e.target.value)}
-                    placeholder="Collez ici le texte de votre support de cours officiel ou fiche de révision..."
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  <input
+                    type="file"
+                    accept=".txt,.md,.csv,.json,.pdf,text/plain,text/markdown,text/csv,application/json,application/pdf"
+                    onChange={handleFileChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs bg-slate-50 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-700 file:text-white hover:file:bg-emerald-800"
                   />
+                  {selectedFile && (
+                    <div className="mt-1.5 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 flex items-center justify-between">
+                      <span>
+                        Fichier sélectionné : <strong>{selectedFile.name}</strong> (
+                        {(selectedFile.size / 1024).toFixed(1)} Ko)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFile(null)}
+                        className="text-rose-700 underline ml-2"
+                      >
+                        Retirer
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {(user?.role === 'teacher' || user?.role === 'admin') && (
-                  <label className="flex items-center gap-2 text-xs text-slate-700">
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Matière officielle
+                    </label>
+                    <select
+                      value={docSubjectId}
+                      onChange={(e) => setDocSubjectId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      {catalog.subjects.map((s: any) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Nom du fichier (si saisie texte)
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={isTeacherResource}
-                      onChange={(e) => setIsTeacherResource(e.target.checked)}
+                      type="text"
+                      required
+                      disabled={Boolean(selectedFile)}
+                      value={docFileName}
+                      onChange={(e) => setDocFileName(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
                     />
-                    Publier comme ressource pédagogique vérifiée par l&apos;enseignant pour la bibliothèque
-                  </label>
+                  </div>
+                </div>
+
+                {!selectedFile && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Contenu textuel du cours (ou sélectionnez un fichier ci-dessus)
+                    </label>
+                    <textarea
+                      rows={5}
+                      required={!selectedFile}
+                      value={docContent}
+                      onChange={(e) => setDocContent(e.target.value)}
+                      placeholder="Collez ici les définitions, théorèmes, formules et exemples du cours..."
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
                 )}
+
                 <button
                   type="submit"
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
                 >
-                  Valider, Stocker et Extraire le Document
+                  Téléverser et Indexer dans SOLOB School
                 </button>
               </form>
 
+              {/* Document Library List */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-emerald-600" />
-                  Bibliothèque Éducative ({workspace?.documents?.length || 0} documents)
+                  <FileText className="w-5 h-5 text-emerald-700" />
+                  Bibliothèque Documentaire Accessible ({workspace?.documents?.length || 0})
                 </h3>
-                <div className="space-y-3 max-h-[460px] overflow-y-auto">
-                  {workspace?.documents?.map((doc: any) => (
-                    <div key={doc.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="font-semibold text-sm text-slate-900">{doc.title}</div>
-                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
-                          {doc.word_count} mots • {doc.processing_status}
-                        </span>
+                {workspace?.documents?.length ? (
+                  <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                    {workspace.documents.map((doc: any) => (
+                      <div
+                        key={doc.id}
+                        onClick={() => setSelectedDocId(doc.id)}
+                        className={`p-4 rounded-xl border cursor-pointer transition ${
+                          selectedDocId === doc.id
+                            ? 'border-emerald-600 bg-emerald-50/70'
+                            : 'border-slate-200 hover:border-slate-300 bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">{doc.title}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              {doc.subject_name || 'Matière générale'} •{' '}
+                              {doc.curriculum_name || 'Programme'} • {doc.word_count} mots
+                            </div>
+                          </div>
+                          {doc.is_teacher_resource && (
+                            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
+                              Ressource Enseignant
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 mt-2 line-clamp-3 font-mono bg-white p-2 rounded border border-slate-200">
+                          {doc.extracted_text}
+                        </p>
+                        <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                          <span>ID: {doc.id}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDocId(doc.id);
+                              setSubTab('tutor');
+                            }}
+                            className="text-emerald-700 font-semibold hover:underline"
+                          >
+                            Interroger le Tuteur IA sur ce document →
+                          </button>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-600 line-clamp-3">{doc.extracted_text}</p>
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-[11px] text-slate-500">ID: {doc.id}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedDocId(doc.id);
-                            setSubTab('tutor');
-                          }}
-                          className="text-xs font-semibold text-emerald-700 hover:underline"
-                        >
-                          Étudier avec le Tuteur IA →
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Aucun document trouvé. Connectez-vous avec un compte étudiant ou enseignant pour consulter ou téléverser des cours.
+                  </p>
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 3: GROUNDED AI TUTOR & FACT-CHECK INSPECTOR */}
+          {/* TAB 2: GROUNDED AI TUTOR & FACT-CHECK INSPECTOR */}
           {subTab === 'tutor' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <form onSubmit={handleAskTutor} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <form
+                onSubmit={handleAskGroundedTutor}
+                className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4"
+              >
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-emerald-600" />
-                  Tuteur Académique IA Ancré & Vérificateur de Sources
+                  <Sparkles className="w-5 h-5 text-emerald-700" />
+                  Interroger le Tuteur IA Ancré dans les Sources
                 </h3>
-                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                  <strong>Principe d&apos;infaillibilité zéro :</strong> Le tuteur SOLOB School indique toujours son mode (<code>LIVE</code> ou <code>MOCK_DEMO</code>), cite les passages exacts de votre document et affiche le niveau d&apos;incertitude épistémique.
-                </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Document de référence pour l&apos;ancrage (Grounding)
+                    Document source de référence (Ancrage obligatoire)
                   </label>
                   <select
                     value={selectedDocId}
                     onChange={(e) => setSelectedDocId(e.target.value)}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   >
-                    <option value="">-- Sans document (Incertitude Élevée signalée) --</option>
+                    <option value="">-- Sélectionner un document --</option>
                     {workspace?.documents?.map((d: any) => (
                       <option key={d.id} value={d.id}>
                         {d.title} ({d.word_count} mots)
@@ -570,86 +557,103 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Votre question académique ou affirmation à vérifier
+                    Votre question académique
                   </label>
                   <textarea
                     rows={4}
                     required
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="Ex: Expliquez le rôle de l'ARN messager et des ribosomes lors de la synthèse des protéines..."
+                    value={tutorQuestion}
+                    onChange={(e) => setTutorQuestion(e.target.value)}
+                    placeholder="Ex: Quelle est l'expression de la force électromotrice induite selon la loi de Faraday et quel est le rôle du signe moins ?"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
 
                 <button
                   type="submit"
+                  disabled={tutorLoading}
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
                 >
-                  Obtenir une Explication Ancrée dans les Sources
+                  {tutorLoading
+                    ? 'Vérification des sources en cours...'
+                    : 'Obtenir une Explication Ancrée avec Citations'}
                 </button>
               </form>
 
+              {/* Fact-Check & Citation Inspector */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                <h3 className="text-lg font-bold text-slate-900">Inspecteur de Réponse & Citations Sources</h3>
-                {latestExplanation ? (
+                <h3 className="text-lg font-bold text-slate-900">
+                  Inspecteur d&apos;Ancrage Documentaire & Incertitude Épistémique
+                </h3>
+                {latestTutorTurn ? (
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                        Mode IA : {latestExplanation.aiMode}
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                          latestTutorTurn.aiResult.uncertaintyLevel === 'LOW'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-800 border border-amber-300'
+                        }`}
+                      >
+                        Incertitude : {latestTutorTurn.aiResult.uncertaintyLevel}
                       </span>
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                        Incertitude : {latestExplanation.uncertaintyLevel}
+                      <span className="px-2.5 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-700 border border-slate-300">
+                        Mode IA : {latestTutorTurn.aiResult.providerMode}
                       </span>
                     </div>
-                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-800 whitespace-pre-line">
-                      {latestExplanation.data?.explanation}
+
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 whitespace-pre-line">
+                      {latestTutorTurn.aiResult.answer}
                     </div>
-                    <div>
-                      <div className="text-xs font-bold uppercase text-slate-700 mb-2">
-                        Passages Sources Vérifiés ({latestExplanation.groundingCitations?.length || 0})
+
+                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                      <strong>Justification du niveau de confiance :</strong>{' '}
+                      {latestTutorTurn.aiResult.uncertaintyReason}
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs font-bold uppercase text-slate-500">
+                        Citations Exactes Extraites du Document ({latestTutorTurn.aiResult.citations?.length || 0})
                       </div>
-                      {latestExplanation.groundingCitations?.map((cit: any, idx: number) => (
-                        <div key={idx} className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs mb-2">
-                          <div className="font-semibold text-emerald-900">
-                            Source : {cit.sourceTitle} (Pertinence: {cit.relevanceScore})
+                      {latestTutorTurn.aiResult.citations?.map((cit: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs space-y-1"
+                        >
+                          <div className="font-bold text-emerald-900">
+                            Source : {cit.sourceTitle} ({cit.confidenceNote})
                           </div>
-                          <div className="text-slate-700 italic mt-1">&ldquo;{cit.excerpt}&rdquo;</div>
+                          <blockquote className="italic text-slate-700 border-l-2 border-emerald-600 pl-2">
+                            &ldquo;{cit.excerpt}&rdquo;
+                          </blockquote>
                         </div>
                       ))}
                     </div>
                   </div>
-                ) : workspace?.studyMaterials?.length > 0 ? (
-                  <div className="space-y-3 max-h-[420px] overflow-y-auto">
-                    {workspace.studyMaterials.map((mat: any) => (
-                      <div key={mat.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-sm text-slate-900">{mat.title}</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
-                            {mat.ai_mode} • Incertitude {mat.uncertainty_level}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 whitespace-pre-line">
-                          {mat.content_json?.explanation || mat.content_json?.summary}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
                 ) : (
-                  <p className="text-sm text-slate-500">Posez une question au tuteur pour afficher l&apos;analyse et les sources.</p>
+                  <p className="text-sm text-slate-500">
+                    Posez une question à gauche pour inspecter la réponse, les citations exactes du document et l&apos;évaluation d&apos;incertitude.
+                  </p>
                 )}
               </div>
             </div>
           )}
 
-          {/* TAB 4: EXERCISES, QUIZZES & CORRECTIONS */}
+          {/* TAB 3: REVISION SHEETS & GRADED EXERCISES */}
           {subTab === 'exercises' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-6">
-                <form onSubmit={handleGenerateExercise} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                  <h3 className="text-lg font-bold text-slate-900">Générer Fiche de Révision & Exercice d&apos;Application</h3>
+                <form
+                  onSubmit={handleGenerateExercise}
+                  className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4"
+                >
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Générer une Fiche de Révision & un Exercice Noté
+                  </h3>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Document Source</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Document source
+                    </label>
                     <select
                       value={selectedDocId}
                       onChange={(e) => setSelectedDocId(e.target.value)}
@@ -664,161 +668,337 @@ export function SchoolView({ user, sessionToken, notify }: SchoolViewProps) {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">Type de support</label>
-                      <select
-                        value={genMaterialType}
-                        onChange={(e) => setGenMaterialType(e.target.value as any)}
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Titre de la fiche / exercice
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={genTitle}
+                        onChange={(e) => setGenTitle(e.target.value)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      >
-                        <option value="EXAM_PREP">Préparation Examen (BAC/BEPC/WAEC)</option>
-                        <option value="SUMMARY">Résumé Structuré</option>
-                        <option value="FLASHCARDS">Flashcards de Mémorisation</option>
-                        <option value="QUIZ">Quiz d&apos;Auto-Évaluation</option>
-                      </select>
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">Niveau d&apos;exigence</label>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Niveau d&apos;exigence
+                      </label>
                       <select
                         value={genDifficulty}
                         onChange={(e) => setGenDifficulty(e.target.value as any)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                       >
-                        <option value="FOUNDATION">Fondamental</option>
-                        <option value="INTERMEDIATE">Intermédiaire</option>
-                        <option value="EXAM_LEVEL">Niveau Examen Officiel</option>
+                        <option value="EASY">Fondamental (EASY)</option>
+                        <option value="MEDIUM">Consolidation (MEDIUM)</option>
+                        <option value="EXAM_LEVEL">Niveau Examen BAC / WAEC (EXAM_LEVEL)</option>
                       </select>
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Titre de la séquence</label>
-                    <input
-                      type="text"
-                      required
-                      value={genTitle}
-                      onChange={(e) => setGenTitle(e.target.value)}
-                      placeholder="Ex: Entraînement BAC Série D — Synthèse des Protéines"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </div>
                   <button
                     type="submit"
+                    disabled={tutorLoading}
                     className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
                   >
-                    Générer Fiche + Exercice Noté (/20)
+                    Générer Fiche de Révision + Exercice avec Barème
                   </button>
                 </form>
 
-                {/* Active Exercise Submission Form */}
-                {activeExercise && (
-                  <form onSubmit={handleSubmitExercise} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-bold text-slate-900">{activeExercise.title}</h3>
-                      <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-bold">
-                        Barème /{activeExercise.max_score} pts
-                      </span>
-                    </div>
-
-                    <div className="space-y-4">
-                      {(activeExercise.questions_json || []).map((q: any) => (
-                        <div key={q.id} className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                          <div className="text-xs font-bold text-slate-800">
-                            {q.prompt} ({q.maxPoints} pts)
-                          </div>
-                          <div className="text-[11px] text-slate-500">Critère : {q.criterion}</div>
-                          <textarea
-                            rows={3}
-                            required
-                            value={answers[q.id] || ''}
-                            onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                            placeholder="Rédigez votre réponse argumentée ici..."
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
-                          />
+                {/* Revision Materials List */}
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                  <h4 className="font-bold text-sm text-slate-900">
+                    Fiches de Révision & Flashcards Générées ({workspace?.revisionMaterials?.length || 0})
+                  </h4>
+                  {workspace?.revisionMaterials?.map((rm: any) => (
+                    <div key={rm.id} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                      <div className="font-bold text-sm text-emerald-900">{rm.title}</div>
+                      <p className="text-xs text-slate-700">
+                        {rm.content_json?.summaryText}
+                      </p>
+                      {rm.content_json?.flashcards?.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {rm.content_json.flashcards.map((fc: any, i: number) => (
+                            <div key={i} className="p-2 rounded bg-white border border-slate-200 text-xs">
+                              <div className="font-semibold text-slate-800">Q: {fc.front}</div>
+                              <div className="text-emerald-700 mt-1">R: {fc.back}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
-                    >
-                      Soumettre mes Réponses & Obtenir la Correction Détaillée
-                    </button>
-                  </form>
-                )}
-              </div>
-
-              {/* Correction & Submissions History */}
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                <h3 className="text-lg font-bold text-slate-900">Corrections Détaillées & Barème</h3>
-                {latestCorrection && (
-                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-emerald-950">
-                        Note obtenue : {latestCorrection.score} / {latestCorrection.max_score} ({latestCorrection.percentage}%)
-                      </span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
-                        {latestCorrection.ai_mode}
-                      </span>
-                    </div>
-                    <p className="text-xs text-emerald-900 font-medium">{latestCorrection.overall_feedback}</p>
-                    <p className="text-[11px] text-slate-600">{latestCorrection.uncertainty_note}</p>
-                    <div className="space-y-2 pt-2">
-                      {(latestCorrection.corrections_json || []).map((c: any) => (
-                        <div key={c.questionId} className="p-3 rounded bg-white border border-emerald-200 text-xs">
-                          <div className="font-semibold text-slate-900">
-                            Question {c.questionId} : {c.awardedPoints}/{c.maxPoints} pts
-                          </div>
-                          <div className="text-slate-700 mt-1">{c.explanation}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="text-xs font-bold uppercase text-slate-500">Copies Précédentes Enregistrées</div>
-                  {workspace?.submissions?.map((sub: any) => (
-                    <div key={sub.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-sm text-slate-900">{sub.exercise_title}</span>
-                        <span className="font-bold text-sm text-emerald-700">
-                          {sub.score}/{sub.max_score} ({sub.percentage}%)
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600">{sub.overall_feedback}</p>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* Active Exercise Taking & Grading Feedback */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Passer l&apos;Exercice & Correction par Barème
+                  </h3>
+                  {workspace?.exercises?.length > 1 && (
+                    <select
+                      value={activeExercise?.id || ''}
+                      onChange={(e) => {
+                        const found = workspace.exercises.find((x: any) => x.id === e.target.value);
+                        setActiveExercise(found || null);
+                        setLatestSubmissionResult(null);
+                      }}
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                    >
+                      {workspace.exercises.map((ex: any) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {activeExercise ? (
+                  <form onSubmit={handleSubmitExercise} className="space-y-4">
+                    <div className="text-xs text-slate-500">
+                      Difficulté : <strong>{activeExercise.difficulty}</strong> • Barème total :{' '}
+                      <strong>{activeExercise.max_score} pts</strong>
+                    </div>
+
+                    {activeExercise.questions_json?.map((q: any, idx: number) => (
+                      <div key={q.id} className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                        <div className="text-sm font-bold text-slate-900">
+                          Question {idx + 1} ({q.points} pts) : {q.prompt}
+                        </div>
+                        {q.options?.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {q.options.map((opt: string) => (
+                              <label key={opt} className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name={`question_${q.id}`}
+                                  value={opt}
+                                  checked={answersMap[q.id] === opt}
+                                  onChange={() =>
+                                    setAnswersMap((prev) => ({ ...prev, [q.id]: opt }))
+                                  }
+                                />
+                                <span>{opt}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <textarea
+                            rows={3}
+                            value={answersMap[q.id] || ''}
+                            onChange={(e) =>
+                              setAnswersMap((prev) => ({ ...prev, [q.id]: e.target.value }))
+                            }
+                            placeholder="Rédigez votre démonstration ou réponse complète..."
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white"
+                          />
+                        )}
+                      </div>
+                    ))}
+
+                    <button
+                      type="submit"
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
+                    >
+                      Soumettre mes Réponses pour Correction Détaillée
+                    </button>
+                  </form>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Aucun exercice sélectionné. Générez un exercice à partir d&apos;un cours à gauche.
+                  </p>
+                )}
+
+                {latestSubmissionResult && (
+                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 space-y-2">
+                    <div className="font-bold text-emerald-950 text-sm">
+                      Résultat : {latestSubmissionResult.score} / {latestSubmissionResult.max_score} (
+                      {latestSubmissionResult.percentage}%)
+                    </div>
+                    <div className="space-y-1.5">
+                      {latestSubmissionResult.feedback_json?.map((fb: any, i: number) => (
+                        <div key={i} className="text-xs bg-white p-2.5 rounded border border-emerald-200">
+                          <div className="font-semibold text-slate-900">
+                            Question {fb.questionId} : {fb.awardedPoints}/{fb.maxPoints} pts
+                          </div>
+                          <div className="text-slate-700 mt-0.5">{fb.explanation}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* TAB 5: ACTIVITY HISTORY & PROGRESS */}
-          {subTab === 'history' && (
+          {/* TAB 4: PROGRESS & ACTIVITY HISTORY */}
+          {subTab === 'progress' && (
             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900">
-                  Journal d&apos;Activité Académique Persistant ({workspace?.activities?.length || 0} événements)
-                </h3>
-                <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
-                  Progression Cumulée : {workspace?.progressSummary?.cumulativeProgressScore || 0}%
-                </span>
+              <h3 className="text-lg font-bold text-slate-900">
+                Journal de Progression Académique Persisté ({workspace?.activities?.length || 0} activités)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-600 bg-slate-50">
+                      <th className="p-3">Date</th>
+                      <th className="p-3">Type d&apos;Activité</th>
+                      <th className="p-3">Matière</th>
+                      <th className="p-3">Score (%)</th>
+                      <th className="p-3">Détails</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {workspace?.activities?.map((act: any) => (
+                      <tr key={act.id}>
+                        <td className="p-3 text-slate-500">
+                          {new Date(act.created_at).toLocaleString('fr-FR')}
+                        </td>
+                        <td className="p-3 font-mono font-semibold text-emerald-800">
+                          {act.activity_type}
+                        </td>
+                        <td className="p-3">{act.subject_id || 'Général'}</td>
+                        <td className="p-3 font-bold">
+                          {act.score_percentage !== null && act.score_percentage !== undefined
+                            ? `${act.score_percentage}%`
+                            : '—'}
+                        </td>
+                        <td className="p-3 font-mono text-[11px] text-slate-600">
+                          {JSON.stringify(act.metadata_json)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="divide-y divide-slate-200">
-                {workspace?.activities?.map((act: any) => (
-                  <div key={act.id} className="py-3 flex items-center justify-between gap-4">
-                    <div>
-                      <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] font-bold mr-2">
-                        {act.activity_type}
+            </div>
+          )}
+
+          {/* TAB 5: CURRICULUM & PROFILE */}
+          {subTab === 'profile' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <form
+                onSubmit={handleSaveProfile}
+                className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4"
+              >
+                <h3 className="text-lg font-bold text-slate-900">
+                  Configurer mon Programme Officiel & Objectif d&apos;Examen
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Pays (Code ISO)
+                    </label>
+                    <input
+                      type="text"
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Année cible d&apos;examen
+                    </label>
+                    <input
+                      type="number"
+                      value={examTargetYear}
+                      onChange={(e) => setExamTargetYear(Number(e.target.value))}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Programme Officiel (Vérifié vs En Préparation)
+                  </label>
+                  <select
+                    value={curriculumId}
+                    onChange={(e) => setCurriculumId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {catalog.curricula.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} [{c.country_code}] — {c.verified ? 'VÉRIFIÉ' : 'NON VÉRIFIÉ'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Niveau / Classe
+                  </label>
+                  <select
+                    value={gradeLevelId}
+                    onChange={(e) => setGradeLevelId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {catalog.gradeLevels.map((g: any) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Établissement scolaire / Université
+                  </label>
+                  <input
+                    type="text"
+                    value={schoolName}
+                    onChange={(e) => setSchoolName(e.target.value)}
+                    placeholder="Ex: Collège Père Aupiais — Cotonou"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Objectifs d&apos;apprentissage
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={learningGoals}
+                    onChange={(e) => setLearningGoals(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm transition"
+                >
+                  Enregistrer le Profil Académique
+                </button>
+              </form>
+
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <h3 className="text-lg font-bold text-slate-900">
+                  Transparence des Programmes & Couverture Régionale
+                </h3>
+                <p className="text-xs text-slate-600">
+                  Conformément aux exigences d&apos;intégrité SOLOB+, les programmes officiels non encore intégralement audités sont explicitement marqués comme non vérifiés.
+                </p>
+                {catalog.curricula.map((c: any) => (
+                  <div key={c.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-slate-900">{c.name}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                          c.verified
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {c.verified ? 'PROGRAMME VÉRIFIÉ' : 'COUVERTURE PARTIELLE (NON VÉRIFIÉ)'}
                       </span>
-                      <span className="text-sm text-slate-900 font-medium">{act.summary}</span>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-xs font-bold text-emerald-700">+{act.progress_delta}%</span>
-                      <div className="text-[11px] text-slate-400">
-                        {new Date(act.created_at).toLocaleString('fr-FR')}
-                      </div>
-                    </div>
+                    <p className="text-xs text-slate-600">{c.description}</p>
                   </div>
                 ))}
               </div>

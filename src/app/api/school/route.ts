@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getAuthenticatedUserFromRequest } from '@/lib/core/auth';
-import { handleApiError } from '@/lib/core/http';
-import { AppError } from '@/lib/core/rbac';
+import { resolveUserFromRequest } from '@/lib/core/auth';
+import { AppError, enforceCsrfProtection, handleApiError } from '@/lib/core/http';
+import { enforceRateLimit, extractTrustedClientIp } from '@/lib/core/rate-limit';
+import { inferAllowedMimeType } from '@/lib/core/storage';
 import {
   generateRevisionAndExercise,
   getSchoolCatalog,
@@ -14,13 +15,17 @@ import {
 
 export async function GET(req: Request) {
   try {
+    const user = await resolveUserFromRequest(req);
     const catalog = await getSchoolCatalog();
-    const user = await getAuthenticatedUserFromRequest(req);
-    if (!user) {
-      return NextResponse.json({ ok: true, catalog, workspace: null });
+    let workspace = null;
+    if (user && (user.role === 'student' || user.role === 'teacher' || user.role === 'admin')) {
+      workspace = await getStudentWorkspaceData(user);
     }
-    const workspace = await getStudentWorkspaceData(user);
-    return NextResponse.json({ ok: true, catalog, workspace });
+    return NextResponse.json({
+      ok: true,
+      catalog,
+      workspace,
+    });
   } catch (err) {
     return handleApiError(err);
   }
@@ -28,19 +33,66 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const user = await getAuthenticatedUserFromRequest(req);
+    enforceCsrfProtection(req);
+    const clientIp = extractTrustedClientIp(req);
+    await enforceRateLimit(`api:school:${clientIp}`, 60, 60_000);
+
+    const user = await resolveUserFromRequest(req);
+    const contentType = (req.headers.get('content-type') || '').toLowerCase();
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      const action = String(formData.get('action') || 'upload_document');
+      if (action !== 'upload_document') {
+        throw new AppError(
+          `Multipart upload is only supported for 'upload_document' action.`,
+          400,
+          'INVALID_MULTIPART_ACTION'
+        );
+      }
+
+      const title = String(formData.get('title') || '').trim();
+      const curriculumId = formData.get('curriculumId')
+        ? String(formData.get('curriculumId'))
+        : null;
+      const subjectId = formData.get('subjectId') ? String(formData.get('subjectId')) : null;
+      const isTeacherResource = formData.get('isTeacherResource') === 'true';
+
+      const fileField = formData.get('file');
+      let originalFileName = String(formData.get('originalFileName') || '').trim();
+      let mimeType = String(formData.get('mimeType') || '').trim();
+      let content: Buffer | string;
+
+      if (fileField && typeof (fileField as Blob).arrayBuffer === 'function') {
+        const blob = fileField as File;
+        const ab = await blob.arrayBuffer();
+        content = Buffer.from(ab);
+        originalFileName = blob.name || originalFileName || 'uploaded_document.txt';
+        mimeType = inferAllowedMimeType(originalFileName, blob.type || mimeType);
+      } else {
+        const textContent = String(formData.get('content') || '');
+        originalFileName = originalFileName || 'document.txt';
+        mimeType = inferAllowedMimeType(originalFileName, mimeType || 'text/plain');
+        content = Buffer.from(textContent, 'utf8');
+      }
+
+      const result = await uploadSchoolDocument(user, {
+        title,
+        originalFileName,
+        mimeType,
+        content,
+        curriculumId,
+        subjectId,
+        isTeacherResource,
+      });
+      return NextResponse.json({ ok: true, ...result }, { status: 201 });
+    }
+
     const body = await req.json();
     const action = body?.action;
 
     if (action === 'upsert_profile') {
-      const profile = await upsertAcademicProfile(user, {
-        country: body.country,
-        curriculumId: body.curriculumId,
-        levelId: body.levelId,
-        primarySubjectId: body.primarySubjectId,
-        institutionName: body.institutionName,
-        learningGoals: body.learningGoals,
-      });
+      const profile = await upsertAcademicProfile(user, body);
       return NextResponse.json({ ok: true, profile });
     }
 
@@ -87,7 +139,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, submission }, { status: 201 });
     }
 
-    throw new AppError(`Unknown school action '${action}'.`, 400, 'UNKNOWN_ACTION');
+    throw new AppError(`Unknown school action '${String(action)}'.`, 400, 'UNKNOWN_ACTION');
   } catch (err) {
     return handleApiError(err);
   }
