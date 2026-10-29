@@ -12,3 +12,5 @@ data/storage/
 data/storage-test*/
 *.log
 .DS_Store
+tsconfig.tsbuildinfo
+*.tsbuildinfo

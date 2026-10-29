@@ -1,60 +1,38 @@
-# SOLOB+ Automated Verification & Test Report
+# SOLOB+ Test Report — 2026-10-29 (branch `security/production-readiness`)
 
-- **Date**: Monday, Oct 26, 2026 (Africa/Porto-Novo UTC+1)
-- **Test Runner**: Vitest `v3.2.7`
-- **Database Engine Under Test**: Real Embedded PostgreSQL 16 (`@electric-sql/pglite` in isolated `memory://` mode per test, executing `db/migrations/001_initial_schema.sql`)
-- **Total Test Suites**: 1 file (`tests/solob-plus.test.ts`)
-- **Total Mandatory Tests**: **15 passed / 15 total (100% pass rate)**
+Environment: Node v20.19.2, Vitest 3.2.7, embedded PostgreSQL 16 (PGlite, `memory://`, fresh DB per test).
 
----
+Command: `npm test` → **exit code 0 — 23 / 23 passed** (1 file, `tests/solob-plus.test.ts`).
 
-## Coverage Matrix Against Directive Section 12
+## Core suites (15)
+1. Registration, login, logout & revocation — PASS
+2. Server-side role enforcement — PASS
+3. School / Business permission separation — PASS
+4. Student academic activity persistence — PASS
+5. File upload validation & authorization — PASS
+6. AI provider failure / timeout handling — PASS
+7. Client project creation (both modes) — PASS
+8. Talent assignment, language verification, task access — PASS
+9. Submission / revision / approval workflows — PASS
+10. Delivery report permissions — PASS
+11. Compensation consistency, live transfer blocked — PASS
+12. Audit log redaction — PASS
+13. Migrations + idempotent seed — PASS
+14. Production build configuration — PASS
+15. End-to-end HTTP journeys (now cookie + CSRF authenticated) — PASS
 
-| # | Directive Requirement | Test Case in `tests/solob-plus.test.ts` | Status |
-|---|---|---|---|
-| 1 | Registration, login and logout | `1. Registration, login and logout: hashes passwords with scrypt, issues HMAC session tokens, authenticates, and revokes on logout` | PASS |
-| 2 | Role enforcement on the backend | `2. Role enforcement on the backend: blocks unauthenticated requests (401) and insufficient roles (403)` | PASS |
-| 3 | Separation of School and Business permissions | `3. Separation of School and Business permissions: prevents School roles from executing Business workflows and vice versa` | PASS |
-| 4 | Student academic activity persistence | `4. Student academic activity persistence: persists profile, document extraction, AI explanations, exercises, submissions, and progress metrics` | PASS |
-| 5 | File upload validation and authorization | `5. File upload validation and authorization: rejects dangerous extensions, invalid MIME types, oversized files, and unauthorized cross-account reads` | PASS |
-| 6 | AI provider failure handling | `6. AI provider failure handling: handles upstream timeouts/failures with retry logging, explicit fallback notice, or 503 when strict live is required` | PASS |
-| 7 | Client project creation | `7. Client project creation: supports both MANAGED_PROJECT and QUALIFIED_TALENT_PROVISION modes with full specifications` | PASS |
-| 8 | Talent assignment and task access controls | `8. Talent assignment and task access controls: blocks assigning contributors without a passed language assessment and blocks unassigned contributors from accessing tasks/files` | PASS |
-| 9 | Submission, revision and approval workflows | `9. Submission, revision and approval workflows: tracks revision numbers, reviewer feedback, REQUEST_REVISION loop, and final APPROVE` | PASS |
-| 10 | Delivery report permissions | `10. Delivery report permissions: allows owning client and operator to inspect finalized delivery report, blocking unrelated clients and contributors` | PASS |
-| 11 | Compensation record consistency | `11. Compensation record consistency: tracks PENDING -> APPROVED -> READY_FOR_PAYOUT -> PAID_SIMULATED and blocks live real-money transfers when provider is disabled` | PASS |
-| 12 | Audit trail behavior | `12. Audit trail behavior: records security events and redacts passwords, tokens, and API keys from metadata` | PASS |
-| 13 | Database migration and seed execution | `13. Database migration and seed execution: applies schema_migrations cleanly and populates synthetic seed idempotently` | PASS |
-| 14 | Production build configuration | `14. Production build configuration: verifies Next.js App Router entrypoints, SQL schema files, and environment template have no hardcoded secrets` | PASS |
-| 15 | Critical user journeys without hardcoded demo records | `15. Critical user journeys without hardcoded demo records: executes full School & Business HTTP API journeys starting from an empty user database` | PASS |
+Changes to core suites: privileged fixtures (operator/reviewer) are created via the non-production `createNonProductionInternalUser()` helper because public registration now (correctly) forbids those roles; suite 15 authenticates via `solob_session` cookie + `X-Solob-CSRF` header instead of a Bearer token from JSON.
 
----
+## Security regression suites (8)
+- SEC-1 Unauthenticated (401) and non-admin (403) `seed_synthetic` denied; no synthetic users created — PASS
+- SEC-2 Production mode: seed, fixture users, synthetic logins, HTTP seed all refused — PASS
+- SEC-3 Public registration of admin/operator/reviewer/teacher rejected (service + HTTP 403); one-time admin bootstrap; provisioning RBAC — PASS
+- SEC-4 No token in JSON; HttpOnly/SameSite/Path/expiry cookie; no localStorage/sessionStorage in `src/`; CSRF (missing header, cross-origin) → 403; forged, expired, revoked tokens rejected — PASS
+- SEC-5 Production `SESSION_SECRET` missing / placeholder / short / low-entropy fails fast (incl. DB startup); strong secret accepted — PASS
+- SEC-6 Spoofed XFF ignored without trusted proxy; trusted-proxy IP extraction; PostgreSQL-backed buckets persist across simulated instances; register & login throttling (429) — PASS
+- SEC-7 Generic 500 with no SQL/path/secret leakage; DB failure after file write leaves no orphaned file — PASS
+- SEC-8 Real multipart uploads (.txt, signed .pdf) → 201; forged PDF → 400; .exe → 4xx — PASS
 
-## Actual Test Execution Output (`npm test`)
-
-```text
-> solob-plus@1.0.0 test
-> vitest run
-
- RUN  v3.2.7 /workspace/solob-plus
-
- ✓ tests/solob-plus.test.ts (15 tests) 12009ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 1. Registration, login and logout: hashes passwords with scrypt, issues HMAC session tokens, authenticates, and revokes on logout  1061ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 2. Role enforcement on the backend: blocks unauthenticated requests (401) and insufficient roles (403)  698ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 3. Separation of School and Business permissions: prevents School roles from executing Business workflows and vice versa  662ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 4. Student academic activity persistence: persists profile, document extraction, AI explanations, exercises, submissions, and progress metrics  674ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 5. File upload validation and authorization: rejects dangerous extensions, invalid MIME types, oversized files, and unauthorized cross-account reads  683ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 6. AI provider failure handling: handles upstream timeouts/failures with retry logging, explicit fallback notice, or 503 when strict live is required  669ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 7. Client project creation: supports both MANAGED_PROJECT and QUALIFIED_TALENT_PROVISION modes with full specifications  670ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 8. Talent assignment and task access controls: blocks assigning contributors without a passed language assessment and blocks unassigned contributors from accessing tasks/files  807ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 9. Submission, revision and approval workflows: tracks revision numbers, reviewer feedback, REQUEST_REVISION loop, and final APPROVE  850ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 10. Delivery report permissions: allows owning client and operator to inspect finalized delivery report, blocking unrelated clients and contributors  810ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 11. Compensation record consistency: tracks PENDING -> APPROVED -> READY_FOR_PAYOUT -> PAID_SIMULATED and blocks live real-money transfers when provider is disabled  748ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 12. Audit trail behavior: records security events and redacts passwords, tokens, and API keys from metadata  670ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 13. Database migration and seed execution: applies schema_migrations cleanly and populates synthetic seed idempotently  925ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 14. Production build configuration: verifies Next.js App Router entrypoints, SQL schema files, and environment template have no hardcoded secrets  1098ms
-   ✓ SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Test Suites) > 15. Critical user journeys without hardcoded demo records: executes full School & Business HTTP API journeys starting from an empty user database  980ms
-
- Test Files  1 passed (1)
-      Tests  15 passed (15)
-```
+## Not run
+- **External PostgreSQL integration test: NOT RUN.** `which postgres pg_ctl initdb docker psql` found none on the host and no `/usr/lib/postgresql`; no disposable server was available. The `DATABASE_URL` / `pg.Pool` path is therefore unverified.
+- No browser/UI end-to-end tests (Playwright etc.); UI verified only via build/typecheck.

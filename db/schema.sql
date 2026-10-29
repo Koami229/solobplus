@@ -466,3 +466,14 @@ CREATE TABLE IF NOT EXISTS privacy_requests (
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 11. DISTRIBUTED RATE LIMIT BUCKETS (SOLOB CORE SECURITY)
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+  bucket_key TEXT PRIMARY KEY,
+  hit_count INTEGER NOT NULL DEFAULT 1,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  window_ms INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_updated ON rate_limit_buckets(updated_at);

@@ -6,7 +6,7 @@ import {
   enforceRole,
   SCHOOL_ROLES,
 } from '@/lib/core/rbac';
-import { uploadAndStoreFile } from '@/lib/core/storage';
+import { deleteStoredFile, inferAllowedMimeType, uploadAndStoreFile } from '@/lib/core/storage';
 import { recordAuditEvent } from '@/lib/core/audit';
 import { executeGroundedAI } from '@/lib/ai/provider';
 
@@ -192,6 +192,25 @@ export async function upsertAcademicProfile(
   return saved.rows[0];
 }
 
+function extractAcademicTextFromBuffer(buffer: Buffer, mimeType: string): string {
+  if (mimeType === 'application/pdf') {
+    const rawLatin1 = buffer.toString('utf8').replace(/\0/g, ' ');
+    const parenthesizedMatches = Array.from(rawLatin1.matchAll(/\(([^()]{3,400})\)/g)).map(
+      (m) => m[1]
+    );
+    if (parenthesizedMatches.length > 0) {
+      return parenthesizedMatches.join(' ').replace(/\s+/g, ' ').trim();
+    }
+    return rawLatin1
+      .replace(/^%PDF-[0-9.]+/m, '')
+      .replace(/\b(obj|endobj|stream|endstream|xref|trailer|startxref)\b/g, ' ')
+      .replace(/[^\p{L}\p{N}\p{P}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return buffer.toString('utf8').replace(/\0/g, '').trim();
+}
+
 export async function uploadSchoolDocument(
   user: AuthenticatedUser | null,
   input: {
@@ -202,6 +221,7 @@ export async function uploadSchoolDocument(
     curriculumId?: string | null;
     subjectId?: string | null;
     isTeacherResource?: boolean;
+    simulateDocumentDbFailure?: boolean;
   }
 ) {
   const actor = await enforceRole(user, SCHOOL_ROLES, 'school', 'UPLOAD_SCHOOL_DOCUMENT');
@@ -210,50 +230,66 @@ export async function uploadSchoolDocument(
     throw new AppError('Document title is required.', 400, 'INVALID_DOCUMENT_TITLE');
   }
 
-  const isTeacherResource = Boolean(input.isTeacherResource && (actor.role === 'teacher' || actor.role === 'admin'));
+  const normalizedMime = inferAllowedMimeType(input.originalFileName, input.mimeType);
+  const buffer =
+    typeof input.content === 'string' ? Buffer.from(input.content, 'utf8') : input.content;
+
+  const isTeacherResource = Boolean(
+    input.isTeacherResource && (actor.role === 'teacher' || actor.role === 'admin')
+  );
   const visibility = isTeacherResource ? 'curriculum_resource' : 'private';
 
   const storedFile = await uploadAndStoreFile({
     user: actor,
     pillar: 'school',
     originalName: input.originalFileName,
-    mimeType: input.mimeType,
-    content: input.content,
+    mimeType: normalizedMime,
+    content: buffer,
     visibility,
   });
 
-  const rawText =
-    typeof input.content === 'string'
-      ? input.content
-      : input.content.toString('utf8');
-
-  const extractedText = rawText.replace(/\0/g, '').trim();
-  if (extractedText.length < 10) {
-    throw new AppError('Document text content is too short for academic extraction (min 10 chars).', 400, 'CONTENT_TOO_SHORT');
-  }
-
-  const wordCount = extractedText.split(/\s+/).filter(Boolean).length;
   const docId = createId('doc');
   const db = await ensureDbReady();
+  let wordCount = 0;
 
-  await db.query(
-    `INSERT INTO school_documents (
-      id, user_id, file_id, curriculum_id, subject_id, title, extracted_text,
-      processing_status, word_count, is_teacher_resource, verified_source
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PROCESSED', $8, $9, $10)`,
-    [
-      docId,
-      actor.id,
-      storedFile.id,
-      input.curriculumId ?? null,
-      input.subjectId ?? null,
-      input.title.trim(),
-      extractedText,
-      wordCount,
-      isTeacherResource,
-      isTeacherResource,
-    ]
-  );
+  try {
+    const extractedText = extractAcademicTextFromBuffer(buffer, normalizedMime);
+    if (extractedText.length < 10) {
+      throw new AppError(
+        'Document text content is too short for academic extraction (min 10 chars).',
+        400,
+        'CONTENT_TOO_SHORT'
+      );
+    }
+
+    if (input.simulateDocumentDbFailure) {
+      throw new Error('Simulated database failure during school_documents persistence');
+    }
+
+    wordCount = extractedText.split(/\s+/).filter(Boolean).length;
+
+    await db.query(
+      `INSERT INTO school_documents (
+        id, user_id, file_id, curriculum_id, subject_id, title, extracted_text,
+        processing_status, word_count, is_teacher_resource, verified_source
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PROCESSED', $8, $9, $10)`,
+      [
+        docId,
+        actor.id,
+        storedFile.id,
+        input.curriculumId || null,
+        input.subjectId || null,
+        input.title.trim(),
+        extractedText,
+        wordCount,
+        isTeacherResource,
+        isTeacherResource,
+      ]
+    );
+  } catch (err) {
+    await deleteStoredFile(storedFile.id, storedFile.storageKey);
+    throw err;
+  }
 
   await logLearningActivity({
     userId: actor.id,

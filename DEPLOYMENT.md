@@ -1,42 +1,27 @@
-# SOLOB+ Deployment & Rollback Guide
+# SOLOB+ Deployment Guide (production readiness — 2026-10-29)
 
-## 1. Environment Variables
-Before deploying to staging or production, configure the environment variables defined in `.env.example`:
+**Not deployed.** Nothing has been published. Real payments are disabled.
+
+## Required production configuration
 - `NODE_ENV=production`
-- `SESSION_SECRET`: High-entropy 64-byte hex secret (`openssl rand -hex 64`).
-- `DATABASE_URL`: Standard PostgreSQL 16 connection string (`postgresql://user:pass@host:5432/solob_plus?sslmode=require`). If omitted in local/edge environments, SOLOB+ uses embedded PostgreSQL (`PGLITE_DATA_DIR=./data/pgdata`).
-- `STORAGE_PROVIDER=local` and `LOCAL_STORAGE_DIR=/var/lib/solob-plus/storage`.
-- `AI_PROVIDER` (`mock` or `openai_compatible`), `AI_API_KEY`, `AI_MODEL`.
-- `PAYMENT_PROVIDER=disabled` (keep `disabled` until live payout provider webhooks and reconciliation are verified).
+- `SESSION_SECRET` — random, ≥ 32 bytes, high entropy, never a placeholder. Generate: `openssl rand -hex 32`. App refuses to start otherwise.
+- `DATABASE_URL=postgresql://…` — managed PostgreSQL 16 (TLS), shared by all instances (also holds sessions and `rate_limit_buckets`). Run `npm run db:migrate` (applies 001 + 002).
+- Reverse proxy / gateway (TLS termination, overwrites `X-Forwarded-For`): set `TRUST_PROXY=true`, `TRUSTED_PROXY_HOPS=<number of proxies>`, and preferably `TRUSTED_PROXY_SECRET` (proxy injects `x-proxy-secret`). Never set `TRUST_PROXY=true` if the app is directly reachable. Optionally add gateway-level rate limiting on `/api/auth`.
+- HTTPS only (cookies are `Secure` in production).
+- `LOCAL_STORAGE_DIR` on a private, non-web-served, non-executable volume (or swap the storage provider for private object storage).
+- `AI_PROVIDER`/`AI_API_KEY` for live AI (otherwise explicit MOCK_DEMO mode).
+- `PAYMENT_PROVIDER=disabled` until a provider is explicitly approved.
+- Never run `npm run db:seed` in production (it refuses anyway).
 
----
-
-## 2. Reproducible Deployment Steps
-```bash
-# 1. Install exact production dependencies
-npm ci
-
-# 2. Apply versioned PostgreSQL schema migrations
-npm run db:migrate
-
-# 3. Run automated verification suite
-npm test
-
-# 4. Build optimized Next.js production bundle
-npm run build
-
-# 5. Start production server (default port 3000)
-npm start
+## Initial administrator (one-time)
 ```
+BOOTSTRAP_ADMIN_EMAIL=you@org BOOTSTRAP_ADMIN_PASSWORD='<≥12 chars, not a demo password>' \
+BOOTSTRAP_ADMIN_NAME='Name' npm run db:bootstrap-admin
+```
+Refuses if an active admin exists, if the email is synthetic, or if the password is weak. Unset the variables afterwards. Further teacher/reviewer/operator/admin accounts are created by an authenticated admin via `/api/admin` `provision_user`.
 
----
+## Steps
+`npm ci && npm run db:migrate && npm run build && npm start` (behind the proxy).
 
-## 3. Database Backup & Rollback Guidance
-1. **Pre-Deployment Backup**:
-   - External PostgreSQL: `pg_dump --format=custom --file=solob_pre_deploy_$(date +%F_%H%M).dump "$DATABASE_URL"`
-   - Embedded PGlite: Archive `./data/pgdata` directory (`tar -czf pgdata_backup.tar.gz ./data/pgdata`).
-2. **Migration Inspection**:
-   - Applied migrations are tracked in `SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC;`.
-3. **Application & Database Rollback**:
-   - Redeploy the previous Git release tag (`git checkout <previous-tag> && npm ci && npm run build && npm start`).
-   - If a schema change must be reverted, restore from the pre-deployment `pg_dump` snapshot into a clean target database and switch `DATABASE_URL`.
+## Pre-go-live checklist
+Run the test suite against a disposable external PostgreSQL with `DATABASE_URL` set (not yet done), verify proxy IP forwarding, back up the DB, review logs for redaction.
