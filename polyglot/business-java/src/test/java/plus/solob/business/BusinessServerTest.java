@@ -21,7 +21,8 @@ class BusinessServerTest {
     }
     @AfterAll static void down() { if (srv != null) srv.stop(); }
 
-    static String mkUser(String role) throws Exception {
+    static String mkUser(String role) throws Exception { return mkUserOn(jdbc, role); }
+    static String mkUserOn(String jdbc, String role) throws Exception {
         String id = "usr_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         try (var c = DriverManager.getConnection(jdbc); var ps = c.prepareStatement("INSERT INTO users (id,email,password_hash,full_name,role,pillar) VALUES (?,?,'x','T',?,'business')")) {
             ps.setString(1, id); ps.setString(2, id + "@e.org"); ps.setString(3, role); ps.executeUpdate();

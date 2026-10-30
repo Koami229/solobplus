@@ -22,18 +22,23 @@ public final class BusinessServer {
     static final Set<String> CATEGORIES = Set.of("AFRICAN_LANG_TRANSCRIPTION_ANNOTATION", "TRANSLATION_LINGUISTIC_VALIDATION",
             "MULTILINGUAL_DATA_PREP", "AI_EVALUATION_MODEL_TESTING", "EXPERT_DATA_ANNOTATION_QA", "SPECIALIZED_AI_PROJECT_TEAM");
 
-    public static final class AppError extends RuntimeException {
+    public static class AppError extends RuntimeException {
         final int status; final String code;
         AppError(int status, String code, String msg) { super(msg); this.status = status; this.code = code; }
     }
     public record Actor(String id, String role, String email) {}
 
-    private final String jdbcUrl; private final byte[] secret;
+    private final Db db; private final BusinessService svc; private final byte[] secret;
     private HttpServer server;
 
     public BusinessServer(String jdbcUrl, String serviceSecret) {
-        this.jdbcUrl = jdbcUrl; this.secret = serviceSecret == null ? new byte[0] : serviceSecret.getBytes(StandardCharsets.UTF_8);
+        this(jdbcUrl, serviceSecret, java.nio.file.Path.of(Optional.ofNullable(System.getenv("LOCAL_STORAGE_DIR")).orElse("./data/storage")));
     }
+    public BusinessServer(String jdbcUrl, String serviceSecret, java.nio.file.Path storageRoot) {
+        this.db = new Db(jdbcUrl); this.svc = new BusinessService(db, storageRoot);
+        this.secret = serviceSecret == null ? new byte[0] : serviceSecret.getBytes(StandardCharsets.UTF_8);
+    }
+    public Db db() { return db; }
 
     public static String toJdbc(String url) { // postgres://user@host:port/db -> jdbc:postgresql://host:port/db?user=user
         if (url == null || url.isBlank() || url.startsWith("jdbc:")) return url;
@@ -49,17 +54,54 @@ public final class BusinessServer {
         server.createContext("/health", ex -> handle(ex, () -> M.createObjectNode().put("ok", true).put("service", "business-java"), 200));
         server.createContext("/projects", ex -> {
             if (!"POST".equals(ex.getRequestMethod())) { handle(ex, () -> { throw new AppError(405, "METHOD_NOT_ALLOWED", "POST only."); }, 0); return; }
-            handle(ex, () -> createProject(actor(ex), M.readTree(ex.getRequestBody().readNBytes(256 * 1024))), 201);
+            handle(ex, () -> createProject(actor(ex), body(ex)), 201);
         });
+        server.createContext("/actions", ex -> {
+            if (!"POST".equals(ex.getRequestMethod())) { handle(ex, () -> { throw new AppError(405, "METHOD_NOT_ALLOWED", "POST only."); }, 0); return; }
+            int[] status = {200};
+            handleDyn(ex, () -> {
+                var a = actor(ex); var b = body(ex);
+                String act = b == null ? "" : b.path("action").asText();
+                if (CREATED_ACTIONS.contains(act)) status[0] = 201;
+                if ("create_project".equals(act)) return createProject(a, b);
+                return svc.dispatch(a, b);
+            }, status);
+        });
+        get("/workspace", (a, id) -> svc.workspace(a), false);
+        get("/tasks/", svc::task, true);
+        get("/reports/", svc::report, true);
+        get("/matches/", svc::matches, true);
+        get("/files/", svc::file, true);
         server.start();
         return server.getAddress().getPort();
     }
-    public void stop() { if (server != null) server.stop(0); }
+    public void stop() { if (server != null) server.stop(0); db.close(); }
+
+    interface Getter { JsonNode get(Actor a, String id) throws Exception; }
+    private void get(String prefix, Getter g, boolean withId) {
+        server.createContext(prefix, ex -> {
+            if (!"GET".equals(ex.getRequestMethod())) { handle(ex, () -> { throw new AppError(405, "METHOD_NOT_ALLOWED", "GET only."); }, 0); return; }
+            handle(ex, () -> {
+                var a = actor(ex);
+                String rest = ex.getRequestURI().getPath().substring(prefix.length());
+                if (withId && !rest.matches("[A-Za-z0-9_-]{1,80}")) throw new AppError(404, "NOT_FOUND", "Unknown resource.");
+                if (!withId && !rest.isEmpty()) throw new AppError(404, "NOT_FOUND", "Unknown resource.");
+                return g.get(a, rest);
+            }, 200);
+        });
+    }
+    static JsonNode body(HttpExchange ex) throws IOException {
+        byte[] raw = ex.getRequestBody().readNBytes(1024 * 1024 + 1);
+        if (raw.length > 1024 * 1024) throw new AppError(413, "PAYLOAD_TOO_LARGE", "Request body too large.");
+        return M.readTree(raw);
+    }
 
     interface Body { JsonNode get() throws Exception; }
-    private void handle(HttpExchange ex, Body b, int ok) throws IOException {
+    static final Set<String> CREATED_ACTIONS = Set.of("create_project", "record_assessment", "create_assign_task", "submit_work", "finalize_delivery");
+    private void handle(HttpExchange ex, Body b, int ok) throws IOException { handleDyn(ex, b, new int[]{ok}); }
+    private void handleDyn(HttpExchange ex, Body b, int[] ok) throws IOException {
         int status; JsonNode out;
-        try { out = b.get(); status = ok; }
+        try { out = b.get(); status = ok[0]; }
         catch (AppError e) { status = e.status; out = err(e.code, e.getMessage()); }
         catch (com.fasterxml.jackson.core.JacksonException e) { status = 400; out = err("VALIDATION_ERROR", "Invalid JSON body."); }
         catch (Exception e) { status = 500; out = err("INTERNAL_ERROR", "Unexpected error."); }
@@ -86,7 +128,7 @@ public final class BusinessServer {
     static String newId(String p) { var r = new byte[12]; new java.security.SecureRandom().nextBytes(r); return p + "_" + HexFormat.of().formatHex(r); }
 
     /** Port of createProjectRequest (src/lib/business/service.ts). */
-    public JsonNode createProject(Actor a, JsonNode b) throws SQLException {
+    public JsonNode createProject(Actor a, JsonNode b) {
         if (!CREATE_PROJECT_ROLES.contains(a.role())) throw new AppError(403, "FORBIDDEN_ROLE", "Role not allowed to create projects.");
         if (b == null || !b.isObject()) throw new AppError(400, "VALIDATION_ERROR", "JSON object expected.");
         String title = text(b, "title"), org = text(b, "organizationName");
@@ -106,9 +148,8 @@ public final class BusinessServer {
         var langs = b.has("targetLanguages") && b.get("targetLanguages").isArray() ? b.get("targetLanguages") : M.createArrayNode();
         var dialects = b.has("targetDialects") && b.get("targetDialects").isArray() ? b.get("targetDialects") : M.createArrayNode();
 
-        try (Connection c = DriverManager.getConnection(jdbcUrl)) {
-            c.setAutoCommit(false);
-            try {
+        try {
+            return db.tx(c -> {
                 String orgId = null;
                 try (var ps = c.prepareStatement("SELECT id FROM organizations WHERE owner_user_id=? AND name=? FOR UPDATE")) {
                     ps.setString(1, a.id()); ps.setString(2, org);
@@ -145,13 +186,12 @@ public final class BusinessServer {
                 try (var ps = c.prepareStatement("INSERT INTO audit_events (id,actor_user_id,actor_role,pillar,action,target_type,target_id,status,redacted_metadata_json) VALUES (?,?,?,'business','PROJECT_REQUEST_CREATED','PROJECT',?,'SUCCESS',?::jsonb)")) {
                     ps.setString(1, newId("aud")); ps.setString(2, a.id()); ps.setString(3, a.role()); ps.setString(4, pid); ps.setString(5, M.writeValueAsString(meta)); ps.executeUpdate();
                 }
-                c.commit();
                 var out = M.createObjectNode().put("ok", true);
                 out.putObject("project").put("id", pid).put("organizationId", orgId).put("organizationName", org).put("title", title)
                         .put("status", "SUBMITTED").put("budgetAmountCents", budget).put("estimatedCostCents", estimated).put("currency", currency);
                 return out;
-            } catch (Exception e) { c.rollback(); throw e; }
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw new AppError(400, "VALIDATION_ERROR", "Invalid JSON."); }
+            });
+        } catch (AppError e) { throw e; } catch (Exception e) { throw new RuntimeException(e); }
     }
 
     public static void main(String[] args) throws Exception {
