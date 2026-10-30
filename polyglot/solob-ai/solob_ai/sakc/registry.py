@@ -24,7 +24,7 @@ def load_wikipedia(raw_dir: pathlib.Path) -> tuple[list[Source], list[Resource]]
         lang = meta["lang"]; src = wikipedia_source(lang, meta["license_proof"]); sources.append(src)
         for line in open(raw_dir / f"{lang}.jsonl", encoding="utf-8"):
             d = json.loads(line)
-            res.append(Resource(source_id=src.source_id, url=f"{d['url']}?oldid={d['revid']}", license=src.license,
+            res.append(Resource(source_id=src.source_id, url=d["url"], license=src.license,
                                 rights_status=src.rights_status, proof_ref=str(pf.name), country=WIKI_COUNTRY[lang],
                                 language=lang, title=d["title"], text=d["text"],
                                 annotation={"annotator": "auto", "labels": {"origin": "wikipedia"}}))
