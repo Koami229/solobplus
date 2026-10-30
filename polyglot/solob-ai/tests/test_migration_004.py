@@ -1,9 +1,10 @@
 """Migration 004 sur un vrai PostgreSQL: définir SAKC_TEST_PG_DSN (base jetable), sinon test ignoré."""
 import os, pathlib, re, pytest
-MIG = pathlib.Path(__file__).resolve().parents[3] / "db" / "migrations"
+ROOT = pathlib.Path(__file__).resolve().parents[3] / "db"
+MIG = ROOT / "migrations"; AI = ROOT / "migrations-ai"
 
 def test_004_is_additive():
-    sql = (MIG / "004_sakc.sql").read_text()
+    sql = (AI / "004_sakc.sql").read_text()
     code = "\n".join(l.split("--")[0] for l in sql.splitlines())
     assert not re.search(r"\b(DROP|TRUNCATE|DELETE|ALTER\s+TABLE\s+(?!sakc_))\b", code, re.I)
 
@@ -12,7 +13,7 @@ def test_004_applies_twice_and_enforces_rights_gate():
     import psycopg
     with psycopg.connect(os.environ["SAKC_TEST_PG_DSN"], autocommit=True) as c:
         for f in sorted(MIG.glob("00*.sql")): c.execute(f.read_text())
-        c.execute((MIG / "004_sakc.sql").read_text())  # idempotente
+        c.execute((AI / "004_sakc.sql").read_text())  # idempotente
         c.execute("insert into sakc_sources(source_id,name,url,license,rights_status,proof) values('t-w','w','u','CC-BY-SA-4.0','rights_verified','{\"a\":1}') on conflict do nothing")
         c.execute("insert into sakc_corpus_versions values('t-v0','{}') on conflict do nothing")
         with pytest.raises(psycopg.errors.CheckViolation):

@@ -3,7 +3,9 @@
 -- ============================================================================
 -- Strictement ADDITIVE: aucune table existante modifiée, aucun DROP. Le contenu textuel reste
 -- dans les fichiers versionnés du corpus; la base ne conserve que métadonnées et traçabilité.
--- NB: non branchée dans la passerelle Rust (db.rs) tant que Koami ne l'a pas validée.
+-- NB: placée dans db/migrations-ai/ (opt-in) car l'app TS historique applique automatiquement
+-- tout db/migrations/*.sql et son test EXT-1 attend exactement 001-003. À appliquer manuellement
+-- (psql -f) ou à intégrer à db/migrations/ quand Koami l'aura validée.
 
 CREATE TABLE IF NOT EXISTS sakc_sources (
   source_id      TEXT PRIMARY KEY,
