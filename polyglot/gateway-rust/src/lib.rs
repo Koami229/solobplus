@@ -11,3 +11,5 @@ pub mod rbac;
 pub mod ui;
 pub mod school_ui;
 pub mod business_ui;
+pub mod admin;
+pub mod admin_ui;

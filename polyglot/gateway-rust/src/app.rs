@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{admin, admin_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -23,6 +23,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/auth", get(me).post(auth_post))
         .route("/api/admin/overview", get(admin_overview))
+        .route("/api/admin", get(admin_get).post(admin_post))
         // 10 MiB file → ~13.4 MiB base64 JSON: the School routes get a 16 MiB body limit, the rest keeps axum's 2 MiB default.
         .route("/api/school/*path", any(proxy_school).layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024)))
         .route("/api/files/:file_id", get(proxy_file))
@@ -36,7 +37,10 @@ pub fn router(state: AppState) -> Router {
         .route("/business", get(business_ui::ui_business))
         .route("/business/matches", get(business_ui::ui_business_matches))
         .route("/business/:action", post(business_ui::ui_business_action))
-        .route("/admin", get(ui_pillar))
+        .route("/admin", get(admin_ui::ui_admin))
+        .route("/admin/:action", post(admin_ui::ui_admin_action))
+        .route("/account", get(admin_ui::ui_account))
+        .route("/account/:action", post(admin_ui::ui_account_action))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
         .layer(middleware::from_fn(move |req: Request, next: Next| async move {
             let mut res = next.run(req).await;
@@ -94,6 +98,16 @@ async fn auth_post(State(s): State<AppState>, method: Method, hm: HeaderMap, bod
             for c in h::clear_cookies(&s.cfg) { res.headers_mut().append(header::SET_COOKIE, c); }
             Ok(res)
         }
+        Some(a @ ("update_privacy" | "export_data")) => {
+            let Some((u, _)) = current_user(&s, &hm).await? else { return Err(AppError::new(401, "UNAUTHENTICATED", "Authentication required.")) };
+            if a == "update_privacy" {
+                let mut r = admin::update_privacy(&s.pool, &u, &v).await?;
+                r["ok"] = json!(true);
+                Ok(Json(r).into_response())
+            } else {
+                Ok(Json(json!({"ok": true, "exportPackage": admin::export_data(&s.pool, &u).await?})).into_response())
+            }
+        }
         other => Err(AppError::new(400, "UNKNOWN_ACTION", &format!("Unknown auth action '{}'.", other.unwrap_or("undefined")))),
     }
 }
@@ -114,6 +128,32 @@ async fn admin_overview(State(s): State<AppState>, hm: HeaderMap) -> Result<Resp
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&s.pool).await?;
     let audits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events").fetch_one(&s.pool).await?;
     Ok(Json(json!({"ok": true, "users": users, "auditEvents": audits})).into_response())
+}
+
+/// GET /api/admin — overview (anonymous allowed; adminDetails only for admin/operator), as in TS.
+async fn admin_get(State(s): State<AppState>, hm: HeaderMap) -> Result<Response, AppError> {
+    let cu = current_user(&s, &hm).await?;
+    Ok(Json(json!({"ok": true, "overview": admin::overview(&s.pool, &s.cfg, cu.as_ref().map(|c| &c.0)).await?})).into_response())
+}
+
+/// POST /api/admin — seed_synthetic | provision_user | toggle_flag (CSRF, 30/min per client, RBAC + audit in admin.rs).
+async fn admin_post(State(s): State<AppState>, method: Method, hm: HeaderMap, body: Bytes) -> Result<Response, AppError> {
+    h::enforce_csrf(&method, &hm, None)?;
+    let ip = h::client_key(&s.cfg, &hm);
+    rate_limit::enforce(&s.pool, &format!("api:admin:{ip}"), 30, 60_000).await?;
+    let cu = current_user(&s, &hm).await?;
+    let u = cu.as_ref().map(|c| &c.0);
+    let v: Value = serde_json::from_slice(&body).map_err(|_| AppError::new(400, "INVALID_JSON", "Request body must be valid JSON."))?;
+    match v.get("action").and_then(Value::as_str) {
+        Some("seed_synthetic") => { let mut r = admin::seed_synthetic(&s, u).await?; r["ok"] = json!(true); Ok(Json(r).into_response()) }
+        Some("provision_user") => Ok((StatusCode::CREATED, Json(json!({"ok": true, "user": admin::provision_user(&s.pool, &s.cfg, u, &v, &ip).await?}))).into_response()),
+        Some("toggle_flag") => {
+            let key = v.get("key").and_then(Value::as_str).unwrap_or("");
+            let en = v.get("enabled").map(|x| x.as_bool().unwrap_or(false)).unwrap_or(false);
+            Ok(Json(json!({"ok": true, "flag": admin::toggle_flag(&s.pool, u, key, en).await?})).into_response())
+        }
+        other => Err(AppError::new(400, "UNKNOWN_ACTION", &format!("Unknown admin action '{}'.", other.unwrap_or("undefined")))),
+    }
 }
 
 async fn proxy(s: AppState, pillar: &'static str, allowed: &[&str], base: String, path: String, method: Method, hm: HeaderMap, body: Bytes) -> Result<Response, AppError> {
@@ -189,13 +229,4 @@ async fn ui_logout(State(s): State<AppState>, hm: HeaderMap, Form(f): Form<CsrfF
     let mut res = Redirect::to("/").into_response();
     for c in h::clear_cookies(&s.cfg) { res.headers_mut().append(header::SET_COOKIE, c); }
     Ok(res)
-}
-async fn ui_pillar(State(s): State<AppState>, hm: HeaderMap, uri: axum::http::Uri) -> Result<Response, AppError> {
-    let cu = current_user(&s, &hm).await?;
-    let (allowed, title): (&[&str], &str) = match uri.path() {
-        "/school" => (rbac::SCHOOL_ROLES, "SOLOB School"), "/business" => (rbac::BUSINESS_ROLES, "SOLOB Business"), _ => (&["admin"], "SOLOB Core — Administration") };
-    let u = cu.as_ref().map(|c| &c.0);
-    let denied = rbac::check_role(u, allowed, "core", "UI").err();
-    let status = denied.as_ref().map(|e| StatusCode::from_u16(e.status).unwrap()).unwrap_or(StatusCode::OK);
-    Ok((status, html(ui::pillar(title, u, denied.map(|e| e.message))) ).into_response())
 }
