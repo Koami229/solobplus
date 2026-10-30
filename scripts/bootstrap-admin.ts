@@ -8,9 +8,8 @@ async function main() {
   const countryCode = process.env.BOOTSTRAP_ADMIN_COUNTRY?.trim() || 'BJ';
 
   if (!email || !password) {
-    console.error(
-      '[SOLOB+ Bootstrap Admin] Missing required environment variables: BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD.'
-    );
+    const missing = ['BOOTSTRAP_ADMIN_EMAIL', 'BOOTSTRAP_ADMIN_PASSWORD'].join(' and ');
+    console.error(`[SOLOB+ Bootstrap Admin] Missing required environment variables: ${missing}.`);
     process.exit(1);
   }
 

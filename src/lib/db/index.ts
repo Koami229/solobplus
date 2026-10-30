@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
-import { validateSessionSecretConfig } from '../core/crypto';
+import { validateRuntimeSecurityConfig } from '../core/config';
 
 export interface QueryResultRow {
   [column: string]: any;
@@ -18,6 +18,12 @@ export interface DatabaseAdapter {
   query<T = QueryResultRow>(sql: string, params?: any[]): Promise<DbQueryResult<T>>;
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
+  /** Runs `fn` inside a single BEGIN/COMMIT transaction on one dedicated connection (ROLLBACK on error). */
+  transaction<T>(fn: (tx: TxQueryable) => Promise<T>): Promise<T>;
+}
+
+export interface TxQueryable {
+  query<T = QueryResultRow>(sql: string, params?: any[]): Promise<DbQueryResult<T>>;
 }
 
 class PgPoolAdapter implements DatabaseAdapter {
@@ -46,6 +52,31 @@ class PgPoolAdapter implements DatabaseAdapter {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  async transaction<T>(fn: (tx: TxQueryable) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tx: TxQueryable = {
+        query: async <R = QueryResultRow>(sql: string, params: any[] = []) => {
+          const r = await client.query(sql, params);
+          return { rows: r.rows as R[], rowCount: r.rowCount ?? r.rows.length };
+        },
+      };
+      const out = await fn(tx);
+      await client.query('COMMIT');
+      return out;
+    } catch (err) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // ignore rollback failure; original error is rethrown
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -84,6 +115,18 @@ class PGliteAdapter implements DatabaseAdapter {
     const client = await this.clientPromise;
     await client.close();
   }
+
+  async transaction<T>(fn: (tx: TxQueryable) => Promise<T>): Promise<T> {
+    const client = await this.clientPromise;
+    return client.transaction(async (t) =>
+      fn({
+        query: async <R = QueryResultRow>(sql: string, params: any[] = []) => {
+          const r = await t.query<R>(sql, params);
+          return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };
+        },
+      })
+    );
+  }
 }
 
 declare global {
@@ -121,7 +164,16 @@ export async function resetDbInstanceForTests(dataDir = 'memory://'): Promise<Da
       // ignore close errors on test reset
     }
   }
-  global.__solobDbAdapter = new PGliteAdapter(dataDir);
+  const externalTestUrl = process.env.DATABASE_URL?.trim();
+  if (process.env.SOLOB_TEST_ALLOW_DESTRUCTIVE_DB_RESET === '1' && externalTestUrl) {
+    // Opt-in only: runs the suite against a DISPOSABLE external PostgreSQL via DATABASE_URL.
+    // Each reset drops and recreates the `public` schema of that database.
+    const pg = new PgPoolAdapter(externalTestUrl);
+    await pg.exec('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+    global.__solobDbAdapter = pg;
+  } else {
+    global.__solobDbAdapter = new PGliteAdapter(dataDir);
+  }
   global.__solobDbMigrated = false;
   await ensureDbReady(global.__solobDbAdapter);
   return global.__solobDbAdapter;
@@ -133,7 +185,7 @@ export async function resetDbInstanceForTests(dataDir = 'memory://'): Promise<Da
  * In production mode, fails fast if SESSION_SECRET is missing or insecure.
  */
 export async function ensureDbReady(adapter?: DatabaseAdapter): Promise<DatabaseAdapter> {
-  validateSessionSecretConfig();
+  validateRuntimeSecurityConfig();
 
   const db = adapter ?? getDb();
   if (global.__solobDbMigrated && !adapter) {
