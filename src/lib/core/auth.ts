@@ -302,33 +302,89 @@ export async function bootstrapInitialAdmin(input: {
     );
   }
 
-  const existingAdmins = await db.query<{ id: string }>(
-    `SELECT id FROM users WHERE role = 'admin' AND is_active = TRUE LIMIT 1`
-  );
-  if (existingAdmins.rows.length > 0) {
+  const countryCode = (input.countryCode || 'BJ').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
     throw new AppError(
-      'An active administrator already exists. One-time bootstrap cannot be re-run.',
-      409,
-      'ADMIN_ALREADY_BOOTSTRAPPED'
+      'Bootstrap administrator country must be an ISO 3166-1 alpha-2 code.',
+      400,
+      'INVALID_BOOTSTRAP_ADMIN_COUNTRY'
     );
   }
 
-  const created = await insertUserAndCreateSession(
-    {
-      email: emailNormalized,
-      password,
-      fullName,
-      role: 'admin',
-      preferredUiLang: 'fr',
-      countryCode: (input.countryCode || 'BJ').toUpperCase(),
-      voiceDataConsent: false,
-      linguisticDataConsent: false,
-    },
-    'cli-bootstrap',
-    'ADMIN_BOOTSTRAP_INITIAL'
-  );
-  await logoutSession(created.sessionToken);
-  return created.user;
+  const alreadyBootstrapped = () =>
+    new AppError(
+      'An initial administrator already exists. One-time bootstrap cannot be re-run.',
+      409,
+      'ADMIN_ALREADY_BOOTSTRAPPED'
+    );
+
+  const userId = createId('usr');
+  const passwordHash = hashPassword(password);
+  const pillar = resolvePillarForRole('admin');
+
+  // Concurrency-safe: one transaction serialised by a transaction-scoped advisory lock, plus the
+  // `system_bootstrap` singleton PRIMARY KEY (migration 003) as a database-level invariant.
+  await db.transaction(async (tx) => {
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext('solob_plus_initial_admin_bootstrap'))`);
+
+    const existing = await tx.query<{ id: string }>(
+      `SELECT id FROM users WHERE role = 'admin' AND is_active = TRUE LIMIT 1`
+    );
+    const marker = await tx.query<{ bootstrap_key: string }>(
+      `SELECT bootstrap_key FROM system_bootstrap WHERE bootstrap_key = 'initial_admin'`
+    );
+    if (existing.rows.length > 0 || marker.rows.length > 0) {
+      throw alreadyBootstrapped();
+    }
+
+    const dup = await tx.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [emailNormalized]);
+    if (dup.rows.length > 0) {
+      throw new AppError('An account with this email already exists.', 409, 'EMAIL_ALREADY_EXISTS');
+    }
+
+    await tx.query(
+      `INSERT INTO users (
+         id, email, password_hash, full_name, role, pillar,
+         preferred_ui_lang, country_code, voice_data_consent, linguistic_data_consent
+       ) VALUES ($1, $2, $3, $4, 'admin', $5, 'fr', $6, FALSE, FALSE)`,
+      [userId, emailNormalized, passwordHash, fullName, pillar, countryCode]
+    );
+
+    const claimed = await tx.query<{ bootstrap_key: string }>(
+      `INSERT INTO system_bootstrap (bootstrap_key, admin_user_id)
+       VALUES ('initial_admin', $1)
+       ON CONFLICT (bootstrap_key) DO NOTHING
+       RETURNING bootstrap_key`,
+      [userId]
+    );
+    if (claimed.rows.length === 0) {
+      throw alreadyBootstrapped(); // rolls back the user insert
+    }
+  });
+
+  // Audit metadata deliberately contains no password, hash, or secret.
+  await recordAuditEvent({
+    actorUserId: userId,
+    actorRole: 'admin',
+    pillar,
+    action: 'ADMIN_BOOTSTRAP_INITIAL',
+    targetType: 'user',
+    targetId: userId,
+    status: 'SUCCESS',
+    ipAddress: 'cli-bootstrap',
+    metadata: { email: emailNormalized, role: 'admin', countryCode },
+  });
+
+  return {
+    id: userId,
+    email: emailNormalized,
+    fullName,
+    role: 'admin',
+    pillar,
+    preferredUiLang: 'fr',
+    countryCode,
+    isActive: true,
+  };
 }
 
 /**

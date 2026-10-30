@@ -1,14 +1,9 @@
-# SOLOB+ Build Report — 2026-10-29 (branch `security/production-readiness`)
+# SOLOB+ — Build Report (Staging Final Hardening, 2026-10-30)
 
-| Command | Exit code | Result |
-|---------|-----------|--------|
-| `npm ci` | 0 | Locked dependencies installed from `package-lock.json` |
-| `npm test` | 0 | 23/23 tests passed (see TEST_REPORT.md) |
-| `npm run lint` (`tsc --noEmit`) | 0 | No type errors (no ESLint configured) |
-| `npm run build` (Next.js 15.5.28) | 0 | Compiled, type-checked, 11 routes generated |
-
-Routes: `/`, `/_not-found`, `/admin`, `/business`, `/school` (static); `/api/admin`, `/api/auth`, `/api/business`, `/api/files/[fileId]`, `/api/school` (dynamic). Shared first-load JS 103 kB.
-
-Fix required during this pass: test suite rewritten to the actual service APIs (initial draft used non-existent exports and failed typecheck with 40 errors), and duplicate `AppError` class unified (caused 500s instead of 401/403/400).
-
-`tsconfig.tsbuildinfo` is git-ignored and untracked. External PostgreSQL build/integration: not run (no server available).
+- Branch: `security/staging-final-hardening` from `main` 91b8f5e.
+- Toolchain: Next.js 15.5.28, TypeScript, Vitest 3.2.7.
+- `npm ci`: exit 0. `npm run lint` (tsc --noEmit): exit 0. `npm run build`: exit 0 ("Compiled successfully"; shared First Load JS 103 kB).
+- `npm test`: exit 0, 36 passed / 4 skipped. Against real PostgreSQL 16.14 via DATABASE_URL: exit 0, 40/40.
+- New migration: `db/migrations/003_bootstrap_singleton.sql`. Apply after 001 and 002.
+- New startup check: `src/instrumentation.ts` validates the security config when the Node.js server starts and fails fast on an invalid TRUST_PROXY, secret or rate-limit config.
+- No secrets committed, nothing deployed, no paid services configured.
