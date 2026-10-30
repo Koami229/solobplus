@@ -19,3 +19,14 @@ TEST_CASE("total clamped to maxScore and feedback thresholds"){
 }
 TEST_CASE("missing answers count as empty; default maxScore"){ auto r = grade({{5,{}}}, {}, 0); REQUIRE(r.maxScore==20.0); REQUIRE(r.score==1.25); }
 TEST_CASE("round2"){ REQUIRE(round2(1.005*1000)/1000 >= 0); REQUIRE(round2(3.14159)==3.14); }
+TEST_CASE("utf8 length counts code points like JS for accented text"){
+  REQUIRE(utf8_trimmed_length("  éèà  ") == 3);
+  std::string fifteen = "ééééééééééééééé"; // 15 code points, 30 bytes
+  REQUIRE(utf8_trimmed_length(fifteen) == 15);
+  REQUIRE(grade_answer({10,{"zz"}}, "éééééééééééééé").points == 0.0);   // 14 chars < 15
+  REQUIRE(grade_answer({10,{"zz"}}, fifteen).points == 3.0);
+}
+TEST_CASE("matched keyword indices are reported"){
+  auto r = grade_answer({4,{"alpha","beta","gamma"}}, "gamma et alpha");
+  REQUIRE(r.matchedIndices == std::vector<int>{0,2});
+}
