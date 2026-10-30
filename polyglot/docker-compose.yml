@@ -1,0 +1,42 @@
+# NOT RUN / NOT DEPLOYED. Local topology reference only. Secrets come from an untracked .env file
+# (see .env.example); no secret value is committed here.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: solob
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: solob
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [internal]
+  gateway:   # Rust: auth, sessions, CSRF, RBAC, rate limit, UI, reverse proxy
+    build: ./gateway-rust
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      SESSION_SECRET: ${SESSION_SECRET:?set in .env}
+      SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+      SCHOOL_SERVICE_URL: http://school:8101
+      BUSINESS_SERVICE_URL: http://business:8102
+      BIND_ADDR: 0.0.0.0:8100
+    ports: ["127.0.0.1:8100:8100"]
+    depends_on: [postgres, school, business]
+    networks: [internal]
+  school:    # Python FastAPI — never exposed outside the internal network
+    build: ./school-python
+    command: uvicorn solob_school.app:app --host 0.0.0.0 --port 8101
+    environment:
+      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      SERVICE_SECRET: ${SERVICE_SECRET}
+    networks: [internal]
+  business:  # Java 21 — never exposed
+    build: ./business-java
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/solob?user=solob&password=${POSTGRES_PASSWORD}
+      SERVICE_SECRET: ${SERVICE_SECRET}
+      BIND_HOST: 0.0.0.0
+    networks: [internal]
+networks:
+  internal: {}
+volumes:
+  pgdata: {}
