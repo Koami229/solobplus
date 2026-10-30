@@ -96,3 +96,16 @@ def test_pool_is_reused_and_reports_missing_db():
             raise RuntimeError("boom")
     with db.connection(url) as c:
         assert c.execute("SELECT count(*) AS n FROM rate_limit_buckets WHERE bucket_key=%s", (f"pool-probe-{tag}",)).fetchone()["n"] == 0
+
+
+def test_service_secret_startup_rules():
+    import pytest
+    from solob_school.config import resolve_service_secret, DEV_ONLY_SERVICE_SECRET
+    good = "s" * 32
+    assert resolve_service_secret(good, "production") == good
+    assert resolve_service_secret(None, "development") == DEV_ONLY_SERVICE_SECRET
+    assert len(DEV_ONLY_SERVICE_SECRET) >= 32
+    for raw, env in [(None, "production"), ("", None), ("short", "development"), ("x" * 31, "production"),
+                     ("changeme" * 5, "production"), (None, "staging")]:
+        with pytest.raises(RuntimeError):
+            resolve_service_secret(raw, env)

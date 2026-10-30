@@ -50,12 +50,14 @@ CATALOG_SQL = [
  ON CONFLICT (curriculum_id, code) DO NOTHING""",
 ]
 
+from . import config
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(12)}"
 
 def create_app(database_url: Optional[str] = None, service_secret: Optional[str] = None) -> FastAPI:
     db_url = database_url or os.environ.get("DATABASE_URL", "")
-    secret = service_secret if service_secret is not None else os.environ.get("SERVICE_SECRET", "")
+    secret = service_secret if service_secret is not None else config.service_secret_from_env()
     app = FastAPI(title="solob-school", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(AppError)

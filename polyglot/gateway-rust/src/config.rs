@@ -63,6 +63,24 @@ pub fn validate_proxy(trust: Option<&str>, secret: Option<&str>, production: boo
     Ok((trust, secret))
 }
 
+pub const DEV_ONLY_SERVICE_SECRET: &str = "solob-local-dev-only-service-secret-2026";
+
+/// SERVICE_SECRET rule shared with School (Python) and Business (Java):
+/// a provided value must be >= 32 chars and not a placeholder in every environment; when missing,
+/// only APP_ENV=development|test gets the dev-only fallback; anything else (incl. unset APP_ENV) refuses to start.
+pub fn validate_service_secret(raw: Option<&str>, app_env: Option<&str>) -> Result<String, AppError> {
+    let s = raw.unwrap_or("").trim();
+    let dev = matches!(app_env.map(|e| e.trim().to_lowercase()).as_deref(), Some("development") | Some("test"));
+    if !s.is_empty() {
+        if s.len() < 32 || is_placeholder(s) {
+            return Err(AppError::new(500, "INVALID_SERVICE_SECRET", "FATAL: SERVICE_SECRET must be a non-placeholder value of at least 32 characters."));
+        }
+        return Ok(s.to_string());
+    }
+    if dev { return Ok(DEV_ONLY_SERVICE_SECRET.to_string()); }
+    Err(AppError::new(500, "INVALID_SERVICE_SECRET", "FATAL: SERVICE_SECRET (>= 32 chars) is required outside APP_ENV=development|test."))
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
         let g = |k: &str| std::env::var(k).ok();
@@ -70,10 +88,7 @@ impl Config {
         let session_secret = validate_session_secret(g("SESSION_SECRET").as_deref(), production)?;
         let (trust_proxy, trusted_proxy_secret) =
             validate_proxy(g("TRUST_PROXY").as_deref(), g("TRUSTED_PROXY_SECRET").as_deref(), production)?;
-        let service_secret = g("SERVICE_SECRET").unwrap_or_default();
-        if production && service_secret.len() < 32 {
-            return Err(AppError::new(500, "INVALID_SERVICE_SECRET", "FATAL: SERVICE_SECRET (>=32 chars) is required in production."));
-        }
+        let service_secret = validate_service_secret(g("SERVICE_SECRET").as_deref(), g("APP_ENV").as_deref())?;
         Ok(Config {
             production,
             session_secret,
@@ -81,7 +96,7 @@ impl Config {
             trust_proxy,
             trusted_proxy_secret,
             proxy_hops: g("TRUSTED_PROXY_HOPS").and_then(|v| v.parse().ok()).filter(|h: &usize| *h >= 1).unwrap_or(1),
-            service_secret: if service_secret.is_empty() { "local-dev-only-service-secret".into() } else { service_secret },
+            service_secret,
             school_url: g("SCHOOL_SERVICE_URL").unwrap_or_else(|| "http://127.0.0.1:8101".into()),
             business_url: g("BUSINESS_SERVICE_URL").unwrap_or_else(|| "http://127.0.0.1:8102".into()),
             allow_memory_rate_limit_fallback: !production,
@@ -96,7 +111,7 @@ impl Config {
             trust_proxy: false,
             trusted_proxy_secret: None,
             proxy_hops: 1,
-            service_secret: "test-service-secret".into(),
+            service_secret: "test-service-secret-0123456789abcdef".into(),
             school_url: "http://127.0.0.1:1".into(),
             business_url: "http://127.0.0.1:1".into(),
             allow_memory_rate_limit_fallback: false,

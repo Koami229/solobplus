@@ -1,3 +1,5 @@
+import os
+os.environ.setdefault("APP_ENV", "test")
 
 import pytest as _pytest
 @_pytest.fixture(scope="session", autouse=True)

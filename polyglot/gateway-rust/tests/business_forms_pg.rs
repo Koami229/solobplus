@@ -142,6 +142,6 @@ async fn student_denied_and_files_routed_by_pillar() {
     assert_eq!(st, StatusCode::OK); assert!(b.contains("java"));
     let (_, b) = send(&c.r, get("/api/files/fil_s", &c.ck)).await; assert!(b.contains("python"));
     let (_, b) = send(&c.r, get("/api/files/fil_unknown", &c.ck)).await; assert!(b.contains("python"), "unknown ids go to School (404 there)");
-    assert!(c.blog.lock().unwrap().iter().any(|(p, hm, _)| p == "/files/fil_b" && hm["x-solob-service-secret"] == "test-service-secret"));
+    assert!(c.blog.lock().unwrap().iter().any(|(p, hm, _)| p == "/files/fil_b" && hm["x-solob-service-secret"] == "test-service-secret-0123456789abcdef"));
     assert!(c.slog.lock().unwrap().iter().all(|(p, _, _)| p != "/files/fil_b"));
 }

@@ -90,7 +90,7 @@ async fn school_forms_require_csrf_and_forward_identity_and_json() {
     let l = log.lock().unwrap();
     let (_, hm, body) = l.iter().find(|(p, _, _)| p == "/submissions").unwrap();
     assert_eq!(body["exerciseId"], "exr_1"); assert_eq!(body["answers"]["q1"], "La lumière"); assert_eq!(body["answers"]["q2"], "x");
-    assert_eq!(hm["x-solob-user-role"], "student"); assert_eq!(hm["x-solob-service-secret"], "test-service-secret");
+    assert_eq!(hm["x-solob-user-role"], "student"); assert_eq!(hm["x-solob-service-secret"], "test-service-secret-0123456789abcdef");
     drop(l);
     let (st, _) = send(&r, form("/school/hack", &ck, &format!("csrf={csrf}"))).await;
     assert_eq!(st, StatusCode::NOT_FOUND);

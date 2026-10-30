@@ -22,6 +22,21 @@ public final class BusinessServer {
     static final Set<String> CATEGORIES = Set.of("AFRICAN_LANG_TRANSCRIPTION_ANNOTATION", "TRANSLATION_LINGUISTIC_VALIDATION",
             "MULTILINGUAL_DATA_PREP", "AI_EVALUATION_MODEL_TESTING", "EXPERT_DATA_ANNOTATION_QA", "SPECIALIZED_AI_PROJECT_TEAM");
 
+    public static final String DEV_ONLY_SERVICE_SECRET = "solob-local-dev-only-service-secret-2026";
+    /** Same rule as the gateway and School: >= 32 chars everywhere; dev-only fallback when missing in development/test; otherwise refuse to start. */
+    public static String resolveServiceSecret(String raw, String appEnv) {
+        String s = raw == null ? "" : raw.trim();
+        boolean dev = appEnv != null && Set.of("development", "test").contains(appEnv.trim().toLowerCase());
+        if (!s.isEmpty()) {
+            String low = s.toLowerCase();
+            if (s.length() < 32 || low.contains("changeme") || low.contains("replace_with"))
+                throw new IllegalStateException("FATAL: SERVICE_SECRET must be a non-placeholder value of at least 32 characters.");
+            return s;
+        }
+        if (dev) return DEV_ONLY_SERVICE_SECRET;
+        throw new IllegalStateException("FATAL: SERVICE_SECRET (>= 32 chars) is required outside APP_ENV=development|test.");
+    }
+
     public static class AppError extends RuntimeException {
         final int status; final String code;
         AppError(int status, String code, String msg) { super(msg); this.status = status; this.code = code; }
@@ -197,7 +212,10 @@ public final class BusinessServer {
     public static void main(String[] args) throws Exception {
         String bind = Optional.ofNullable(System.getenv("BIND_HOST")).orElse("127.0.0.1");
         int port = Integer.parseInt(Optional.ofNullable(System.getenv("PORT")).orElse("8102"));
-        new BusinessServer(toJdbc(System.getenv("DATABASE_URL")), System.getenv("SERVICE_SECRET")).start(bind, port);
+        String secret;
+        try { secret = resolveServiceSecret(System.getenv("SERVICE_SECRET"), System.getenv("APP_ENV")); }
+        catch (IllegalStateException e) { System.err.println(e.getMessage()); System.exit(1); return; }
+        new BusinessServer(toJdbc(System.getenv("DATABASE_URL")), secret).start(bind, port);
         System.out.println("business-java listening on " + bind + ":" + port);
     }
 }
