@@ -1,0 +1,6 @@
+# MÊME CODE, autre fichier: passage au GPU (ex. 1×A100/L4/H100 loué plus tard). Non exécuté: budget GPU = 0 $.
+# ~85 M paramètres, nécessite un corpus SAKC bien plus grand (≥ 2 G tokens) pour avoir du sens.
+model: {vocab_size: 32000, d_model: 768, n_layers: 12, n_heads: 12, d_ff: 3072, max_seq_len: 1024, dropout: 0.0}
+train: {device: cuda, dtype: bfloat16, threads: 8, seed: 1234, batch_size: 32, grad_accum: 8, seq_len: 1024, lr: 0.0006,
+        warmup_steps: 2000, max_steps: 60000, max_minutes: 100000, eval_every: 1000, eval_batches: 100, ckpt_every: 1000,
+        out_dir: artifacts/run_gpu_small, data_dir: artifacts/data_v1, compile: true}
