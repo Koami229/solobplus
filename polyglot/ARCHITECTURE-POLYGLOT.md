@@ -131,3 +131,11 @@ de sous-processus par candidat coûterait plus cher que le calcul. Le C++ reste 
 - Les virements réels sont toujours bloqués (audit `LIVE_MONEY_TRANSFER_BLOCKED`). Le seul mode de paiement est `SANDBOX_SIMULATED`.
 - Visibilité dans l'espace de travail : un relecteur ne voit pas ses propres soumissions ni les tâches assignées à d'autres relecteurs.
 - Il n'existe pas d'endpoint d'envoi de fichiers business, comme dans le TS. Les fichiers sont seulement liés aux tâches.
+
+## 9. Phase 4 — Administration, conteneurs, CI
+
+- L'administration est portée dans gateway-rust (`admin.rs`, `admin_ui.rs`) : overview, toggle_flag, provision_user et seed_synthetic, plus update_privacy et export_data dans `/api/auth` et `/account`.
+- `SERVICE_SECRET` doit faire au moins 32 caractères et ne pas être une valeur factice. S'il manque, la valeur de repli n'est acceptée qu'avec `APP_ENV=development|test` ; sinon le service ne démarre pas.
+- Dockerfiles multi-stage, exécutés sans root : gateway sur distroless `nonroot`, school sur python slim avec le correcteur C++ compilé dans l'image, business sur temurin JRE alpine avec l'utilisateur 10001. Le compose est en lecture seule avec `cap_drop: ALL` et n'est **pas exécuté**.
+- La CI garde les deux jobs TS et ajoute les jobs Rust, Python+C++, C++ et Java sur PostgreSQL 16.
+- Parité détaillée : voir `PARITY.md`.
