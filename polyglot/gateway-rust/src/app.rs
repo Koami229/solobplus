@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -33,7 +33,9 @@ pub fn router(state: AppState) -> Router {
         .route("/school", get(school_ui::ui_school))
         .route("/school/upload", post(school_ui::ui_school_upload).layer(axum::extract::DefaultBodyLimit::max(11 * 1024 * 1024)))
         .route("/school/:action", post(school_ui::ui_school_action))
-        .route("/business", get(ui_pillar))
+        .route("/business", get(business_ui::ui_business))
+        .route("/business/matches", get(business_ui::ui_business_matches))
+        .route("/business/:action", post(business_ui::ui_business_action))
         .route("/admin", get(ui_pillar))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
         .layer(middleware::from_fn(move |req: Request, next: Next| async move {
@@ -140,12 +142,14 @@ async fn proxy_school(State(s): State<AppState>, Path(p): Path<String>, m: Metho
     let base = s.cfg.school_url.clone();
     proxy(s, "school", rbac::SCHOOL_ROLES, base, p, m, hm, b).await
 }
-/// GET /api/files/{id}: any authenticated role; ownership/visibility is enforced by the owning service (School holds stored files).
+/// GET /api/files/{id}: any authenticated role; routed by `stored_files.pillar` (business → Java, otherwise School).
+/// Ownership/visibility is enforced (and denials audited) by the owning service.
 async fn proxy_file(State(s): State<AppState>, Path(id): Path<String>, hm: HeaderMap) -> Result<Response, AppError> {
     if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(AppError::new(400, "INVALID_FILE_ID", "Invalid file id."));
     }
-    let base = s.cfg.school_url.clone();
+    let pillar: Option<String> = sqlx::query_scalar("SELECT pillar FROM stored_files WHERE id = $1").bind(&id).fetch_optional(&s.pool).await?;
+    let base = if pillar.as_deref() == Some("business") { s.cfg.business_url.clone() } else { s.cfg.school_url.clone() };
     proxy(s, "core", rbac::ALL_ROLES, base, format!("files/{id}"), Method::GET, hm, Bytes::new()).await
 }
 async fn proxy_business(State(s): State<AppState>, Path(p): Path<String>, m: Method, hm: HeaderMap, b: Bytes) -> Result<Response, AppError> {
