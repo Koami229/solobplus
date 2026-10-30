@@ -1,11 +1,13 @@
 //! Minimal server-rendered pages. All dynamic values are HTML-escaped.
 use crate::rbac::AuthUser;
 
-pub const CSS: &str = "body{font-family:system-ui,sans-serif;margin:0;background:#f6f7fb;color:#1c2333}header{background:#0b3d2e;color:#fff;padding:1rem 2rem;display:flex;gap:1.5rem;align-items:center}header a{color:#fff}main{max-width:960px;margin:2rem auto;padding:0 1rem}.card{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1rem;box-shadow:0 1px 3px #0002}.err{color:#a40000}input{display:block;margin:.4rem 0 1rem;padding:.5rem;width:100%;max-width:360px}button{padding:.5rem 1rem}";
+pub const CSS: &str = "body{font-family:system-ui,sans-serif;margin:0;background:#f6f7fb;color:#1c2333}header{background:#0b3d2e;color:#fff;padding:1rem 2rem;display:flex;gap:1.5rem;align-items:center}header a{color:#fff}main{max-width:960px;margin:2rem auto;padding:0 1rem}.card{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1rem;box-shadow:0 1px 3px #0002}.err{color:#a40000}input{display:block;margin:.4rem 0 1rem;padding:.5rem;width:100%;max-width:360px}button{padding:.5rem 1rem}textarea,select{display:block;margin:.4rem 0 1rem;padding:.5rem;width:100%;max-width:640px}textarea{min-height:5rem}pre{white-space:pre-wrap}.ok{color:#0b5d2e}";
 
 pub fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
 }
+
+pub fn page(title: &str, body: &str) -> String { layout(title, body) }
 
 fn layout(title: &str, body: &str) -> String {
     format!("<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{t}</title><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><header><strong>SOLOB+</strong><a href=\"/\">Accueil</a><a href=\"/school\">School</a><a href=\"/business\">Business</a><a href=\"/admin\">Admin</a></header><main>{body}</main></body></html>", t = esc(title))

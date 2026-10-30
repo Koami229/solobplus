@@ -9,3 +9,4 @@ pub mod http;
 pub mod rate_limit;
 pub mod rbac;
 pub mod ui;
+pub mod school_ui;

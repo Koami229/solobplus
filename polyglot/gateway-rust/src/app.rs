@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -23,12 +23,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/auth", get(me).post(auth_post))
         .route("/api/admin/overview", get(admin_overview))
-        .route("/api/school/*path", any(proxy_school))
+        // 10 MiB file → ~13.4 MiB base64 JSON: the School routes get a 16 MiB body limit, the rest keeps axum's 2 MiB default.
+        .route("/api/school/*path", any(proxy_school).layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024)))
+        .route("/api/files/:file_id", get(proxy_file))
         .route("/api/business/*path", any(proxy_business))
         .route("/", get(ui_home))
         .route("/login", get(ui_login_page).post(ui_login))
         .route("/logout", post(ui_logout))
-        .route("/school", get(ui_pillar))
+        .route("/school", get(school_ui::ui_school))
+        .route("/school/upload", post(school_ui::ui_school_upload).layer(axum::extract::DefaultBodyLimit::max(11 * 1024 * 1024)))
+        .route("/school/:action", post(school_ui::ui_school_action))
         .route("/business", get(ui_pillar))
         .route("/admin", get(ui_pillar))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
@@ -135,6 +139,14 @@ async fn proxy(s: AppState, pillar: &'static str, allowed: &[&str], base: String
 async fn proxy_school(State(s): State<AppState>, Path(p): Path<String>, m: Method, hm: HeaderMap, b: Bytes) -> Result<Response, AppError> {
     let base = s.cfg.school_url.clone();
     proxy(s, "school", rbac::SCHOOL_ROLES, base, p, m, hm, b).await
+}
+/// GET /api/files/{id}: any authenticated role; ownership/visibility is enforced by the owning service (School holds stored files).
+async fn proxy_file(State(s): State<AppState>, Path(id): Path<String>, hm: HeaderMap) -> Result<Response, AppError> {
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(AppError::new(400, "INVALID_FILE_ID", "Invalid file id."));
+    }
+    let base = s.cfg.school_url.clone();
+    proxy(s, "core", rbac::ALL_ROLES, base, format!("files/{id}"), Method::GET, hm, Bytes::new()).await
 }
 async fn proxy_business(State(s): State<AppState>, Path(p): Path<String>, m: Method, hm: HeaderMap, b: Bytes) -> Result<Response, AppError> {
     let base = s.cfg.business_url.clone();
