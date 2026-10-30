@@ -96,3 +96,38 @@ le hash scrypt produit par Node doit toujours permettre le login.
 **Variables** : `GRADER_BIN`, `LOCAL_STORAGE_DIR`, `MAX_UPLOAD_BYTES` (10 Mio par défaut), `AI_RATE_LIMIT_PER_MINUTE`, `SERVICE_SECRET` (≥ 32 caractères, obligatoire : la valeur de dev par défaut de la passerelle est refusée par Python).
 
 **Écarts volontaires vs TS** : contrôle d'accès à l'exercice lors d'une soumission (403 `FORBIDDEN_EXERCISE_ACCESS`), validation explicite du titre et des énumérations, une transaction par action, audits supplémentaires `DOCUMENT_ACCESS_DENIED` / `EXERCISE_ACCESS_DENIED`. IA : mode démo déterministe `MOCK_DEMO` seulement (fournisseur live non porté). « Strictement académique » = rôles School, stockage pilier school, aucun lien projet/tâche Business ; aucun filtre de contenu (absent aussi en TS).
+
+## 8. Phase 3 — SOLOB Business (Java)
+
+**Port.** `business-java` porte les 9 actions de `src/lib/business/service.ts` (`create_project`, `review_project`,
+`upsert_talent_profile`, `record_assessment`, `create_assign_task`, `submit_work`, `review_submission`,
+`finalize_delivery`, `update_compensation`) via `POST /actions`, plus les lectures `GET /workspace`, `/tasks/{id}`,
+`/matches/{projectId}`, `/reports/{id}` et `/files/{id}`. Chaque mutation s'exécute dans une transaction (`Db.tx`).
+Un refus métier (`Db.Denied`) annule la transaction puis écrit l'audit `DENIED` dans une transaction séparée.
+
+**Pool.** HikariCP (Java, `DB_POOL_MAX`, 10 par défaut) et psycopg_pool (Python, même variable).
+
+**Matching.** Il reste en Java (`Matching.java`, port exact de la formule TS, arrondi HALF_UP à 0,1). Il n'est pas
+délégué au module C++ : c'est de l'arithmétique triviale, le coût est dominé par les requêtes SQL, et un appel
+de sous-processus par candidat coûterait plus cher que le calcul. Le C++ reste dédié à la notation School.
+
+**Passerelle.**
+- `/business` sert des formulaires HTML sans JavaScript, adaptés au rôle, avec CSRF HMAC et limite de débit.
+- `/business/matches` affiche le classement des talents.
+- `/api/files/{id}` est routé selon `stored_files.pillar` : les fichiers `business` vont à Java, les autres à School.
+
+**Durcissements et divergences volontaires par rapport au TS :**
+- Interdiction de l'auto-relecture : si le contributeur ou l'assigné de la tâche tente de relire, la réponse est
+  403 `SELF_REVIEW_FORBIDDEN` avec l'audit `SELF_REVIEW_BLOCKED`. Cela vaut aussi pour un opérateur.
+- Un relecteur ne relit que les tâches qui lui sont assignées ou sans relecteur ; sinon 403 avec l'audit
+  `UNAUTHORIZED_TASK_REVIEW_ATTEMPT`.
+- Seule la dernière révision, avec la tâche au statut SUBMITTED, est relisible ; sinon 409.
+- Une tâche APPROVED ou REJECTED n'accepte plus de soumission (409 `TASK_CLOSED`).
+- À la création d'une tâche :
+  - le relecteur doit être différent du contributeur et avoir le rôle reviewer, operator ou admin ;
+  - `sourceFileId` doit être un fichier business non déjà lié (409 sinon).
+- Les pièces jointes d'une soumission doivent être des fichiers business appartenant au soumetteur.
+- Les énumérations (statuts, types, disponibilité) sont validées.
+- Les virements réels sont toujours bloqués (audit `LIVE_MONEY_TRANSFER_BLOCKED`). Le seul mode de paiement est `SANDBOX_SIMULATED`.
+- Visibilité dans l'espace de travail : un relecteur ne voit pas ses propres soumissions ni les tâches assignées à d'autres relecteurs.
+- Il n'existe pas d'endpoint d'envoi de fichiers business, comme dans le TS. Les fichiers sont seulement liés aux tâches.
