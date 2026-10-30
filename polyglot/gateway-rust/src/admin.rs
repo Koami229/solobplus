@@ -207,8 +207,9 @@ pub async fn seed_synthetic(s: &AppState, actor: Option<&AuthUser>) -> Result<Va
     pillar.push(json!({"item": "school.academic_profile(student.amina)", "status": st}));
     let st = call(s.cfg.business_url.clone(), made["client.waxangari@synthetic.solob.local"].clone(), "actions",
         json!({"action": "create_project", "organizationName": "[SYNTHETIC] Waxangari Health AI Lab", "title": "[SYNTHETIC] Corpus vocal Fɔngbè santé",
-            "description": "[SYNTHETIC] Transcription de 50 courts messages de santé publique en Fɔngbè (données fictives).", "projectType": "TRANSCRIPTION",
-            "targetLanguages": ["fon"], "targetDialects": [], "budgetAmount": 250000, "budgetCurrency": "XOF"})).await;
+            "description": "[SYNTHETIC] Transcription de 50 courts messages de santé publique en Fɔngbè (données fictives).", "serviceMode": "MANAGED_PROJECT", "serviceCategory": "AFRICAN_LANG_TRANSCRIPTION_ANNOTATION",
+            "deliverablesSpec": "[SYNTHETIC] 50 transcriptions horodatées (JSON)", "acceptanceCriteria": "[SYNTHETIC] >= 95% exactitude sur échantillon relu",
+            "targetLanguages": ["fon"], "targetDialects": [], "budgetAmountCents": 25000000, "currency": "XOF"})).await;
     pillar.push(json!({"item": "business.project(client.waxangari)", "status": st}));
     let st = call(s.cfg.business_url.clone(), made["talent.fifame@synthetic.solob.local"].clone(), "actions",
         json!({"action": "upsert_talent_profile", "headline": "[SYNTHETIC] Linguiste Fɔngbè", "country": "BJ", "nativeLanguages": ["fon"],
