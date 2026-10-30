@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
 from . import grader, grounding, storage
 from .errors import AppError
+from . import db
 
 RATE_SQL = """
 INSERT INTO rate_limit_buckets AS b (bucket_key, hit_count, window_start, window_ms, updated_at)
@@ -67,9 +68,7 @@ def audit(c, a, action, ttype, tid, status, meta):
 
 def register(app: FastAPI, db_url_fn: Callable[[], str], actor_dep, any_role_actor_dep) -> None:
     def conn(autocommit=False):
-        url = db_url_fn()
-        if not url: raise AppError(503, "DATABASE_UNAVAILABLE", "School database is not configured.")
-        return psycopg.connect(url, autocommit=autocommit, row_factory=psycopg.rows.dict_row)
+        return db.connection(db_url_fn(), autocommit)
 
     def rate_limit(key: str, maximum: int, window_ms: int = 60_000):
         try:

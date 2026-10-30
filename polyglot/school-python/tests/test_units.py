@@ -74,3 +74,25 @@ def test_cpp_grader_parity_with_ts_formula():
 def test_grader_missing_binary_fails_closed(monkeypatch):
     monkeypatch.setenv("GRADER_BIN", "/nonexistent/solob-grade")
     assert err(grader.grade, [], [], 20) == ("GRADER_UNAVAILABLE", 503)
+
+def test_pool_is_reused_and_reports_missing_db():
+    import os, pytest
+    from solob_school import db
+    from solob_school.errors import AppError
+    with pytest.raises(AppError) as e:
+        db.connection("")
+    assert e.value.status == 503
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url: pytest.skip("TEST_DATABASE_URL unset")
+    pids = []
+    for _ in range(25):
+        with db.connection(url) as c1: pids.append(c1.execute("SELECT pg_backend_pid() AS p").fetchone()["p"])
+    assert len(set(pids)) <= 10, "sequential checkouts must reuse pooled backends (max_size=10)"
+    import secrets
+    tag = secrets.token_hex(8)
+    with pytest.raises(RuntimeError):
+        with db.connection(url) as c:
+            c.execute("INSERT INTO rate_limit_buckets (bucket_key, hit_count, window_start, window_ms, updated_at) VALUES (%s, 1, NOW(), 60000, NOW())", (f"pool-probe-{tag}",))
+            raise RuntimeError("boom")
+    with db.connection(url) as c:
+        assert c.execute("SELECT count(*) AS n FROM rate_limit_buckets WHERE bucket_key=%s", (f"pool-probe-{tag}",)).fetchone()["n"] == 0

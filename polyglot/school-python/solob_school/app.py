@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 SCHOOL_ROLES = {"student", "teacher", "admin"}
 
 from .errors import AppError
-from . import routes
+from . import routes, db
 ALL_ROLES = SCHOOL_ROLES | {"contributor", "operator", "reviewer", "org_client"}
 
 class Actor(BaseModel):
@@ -63,9 +63,7 @@ def create_app(database_url: Optional[str] = None, service_secret: Optional[str]
         return JSONResponse({"ok": False, "error": {"code": e.code, "message": e.message}}, status_code=e.status)
 
     def conn():
-        if not db_url:
-            raise AppError(503, "DATABASE_UNAVAILABLE", "School database is not configured.")
-        return psycopg.connect(db_url, row_factory=dict_row)
+        return db.connection(db_url)
 
     def actor(x_solob_service_secret: str = Header(default=""), x_solob_user_id: str = Header(default=""),
               x_solob_user_role: str = Header(default=""), x_solob_user_email: str = Header(default="")) -> Actor:
