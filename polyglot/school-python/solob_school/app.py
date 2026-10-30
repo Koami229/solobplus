@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 
 SCHOOL_ROLES = {"student", "teacher", "admin"}
 
-class AppError(Exception):
-    def __init__(self, status: int, code: str, message: str):
-        self.status, self.code, self.message = status, code, message
+from .errors import AppError
+from . import routes
+ALL_ROLES = SCHOOL_ROLES | {"contributor", "operator", "reviewer", "org_client"}
 
 class Actor(BaseModel):
     id: str
@@ -77,6 +77,19 @@ def create_app(database_url: Optional[str] = None, service_secret: Optional[str]
         if x_solob_user_role not in SCHOOL_ROLES:
             raise AppError(403, "FORBIDDEN_ROLE", "Role not allowed for SOLOB School.")
         return Actor(id=x_solob_user_id, role=x_solob_user_role, email=x_solob_user_email)
+
+    def any_actor(x_solob_service_secret: str = Header(default=""), x_solob_user_id: str = Header(default=""),
+                  x_solob_user_role: str = Header(default=""), x_solob_user_email: str = Header(default="")) -> Actor:
+        """Used only by /files/{id}: any authenticated SOLOB role, per-file authorization is done in storage.read_authorized."""
+        if len(secret) < 32 or not hmac.compare_digest(x_solob_service_secret.encode(), secret.encode()):
+            raise AppError(401, "SERVICE_UNAUTHENTICATED", "Invalid internal service credentials.")
+        if not x_solob_user_id:
+            raise AppError(401, "UNAUTHENTICATED", "Authentication required.")
+        if x_solob_user_role not in ALL_ROLES:
+            raise AppError(403, "FORBIDDEN_ROLE", "Unknown role.")
+        return Actor(id=x_solob_user_id, role=x_solob_user_role, email=x_solob_user_email)
+
+    routes.register(app, lambda: db_url, actor, any_actor)
 
     @app.get("/health")
     def health():
