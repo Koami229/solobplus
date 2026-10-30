@@ -30,3 +30,25 @@ All earlier protections (A–F) are unchanged and their tests still pass.
 - No ESLint config: `npm run lint` is TypeScript `tsc --noEmit` only.
 - No third-party penetration test, malware/AV scanning of uploads, or MFA for privileged accounts yet.
 - Real payments remain disabled (`PAYMENT_PROVIDER=disabled`, live transfer → 400).
+
+## HTTP security headers (MCDL critical hardening, 2026-10-30)
+
+Defined in `src/lib/core/security-headers.ts`, applied to every route by `next.config.ts` (`headers()`), covered by `tests/security-headers.test.ts`.
+
+| Header | Value |
+|---|---|
+| Content-Security-Policy | `default-src 'self'`; `script-src 'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev only); `style-src 'self' 'unsafe-inline'`; `img-src 'self' data: blob:`; `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`; `frame-ancestors 'none'`; `upgrade-insecure-requests` (prod) |
+| Strict-Transport-Security | `max-age=63072000; includeSubDomains` — **production only** |
+| X-Frame-Options | `DENY` |
+| X-Content-Type-Options | `nosniff` |
+| Referrer-Policy | `strict-origin-when-cross-origin` |
+| Permissions-Policy | camera, microphone, geolocation, payment, usb disabled |
+| Cross-Origin-Opener-Policy | `same-origin` |
+
+`X-Powered-By` is disabled. Verified locally on a production build: headers present on `/`, and `/`, `/school`, `/business`, `/admin` render in headless Chrome with no CSP violation logged.
+
+Known limitation: `script-src 'unsafe-inline'` is required by Next.js inline bootstrap scripts without a nonce middleware. Next step: nonce-based CSP via middleware.
+
+## Continuous integration
+
+`.github/workflows/ci.yml`: `npm ci`, lint, build, tests on embedded PGlite, plus a job with a PostgreSQL 16 service (`DATABASE_URL`, `SOLOB_TEST_ALLOW_DESTRUCTIVE_DB_RESET=1`) on a throwaway CI database. `SESSION_SECRET` is generated per run with `openssl rand`; the Postgres password is a CI-only dummy value. No repository secrets are used.
