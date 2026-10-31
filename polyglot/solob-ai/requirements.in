@@ -7,3 +7,5 @@ pytest
 datasketch
 pyyaml
 psycopg[binary]
+mwparserfromhell  # Mission 3: parsing des dumps Wikibooks
+transformers==4.46.3  # Mission 3: AfroLID (identification de langue), outil uniquement
