@@ -154,7 +154,7 @@ jobs:
             echo "SERVICE_SECRET=$(openssl rand -hex 32)"; echo "APP_ENV=staging"; } > .env
           echo "SMOKE_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
       - name: Build all images with buildx (gateway Rust, School Python+C++, Business Java)
-        run: docker buildx bake -f docker-compose.yml --load gateway school business
+        run: docker buildx bake --allow=fs.read=.. -f docker-compose.yml --load gateway school business
       - name: Images run as non-root and declare a HEALTHCHECK
         run: |
           for i in gateway school business; do
