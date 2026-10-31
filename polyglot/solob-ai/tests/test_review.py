@@ -43,29 +43,30 @@ def test_005_is_additive():
 
 @pytest.mark.skipif(not os.environ.get("SAKC_TEST_PG_DSN"), reason="SAKC_TEST_PG_DSN non défini")
 def test_005_on_postgres():
-    import psycopg
+    import psycopg, uuid
+    x = uuid.uuid4().hex[:8]  # identifiants uniques: test rejouable sur une base déjà utilisée (audit append-only)
     with psycopg.connect(os.environ["SAKC_TEST_PG_DSN"], autocommit=True) as c:
         for f in sorted(MIG.glob("00*.sql")): c.execute(f.read_text())
         for _ in range(2):  # idempotente
             c.execute((AI / "004_sakc.sql").read_text()); c.execute((AI / "005_human_review.sql").read_text())
         for u in ("u1", "u2", "u3"):
-            c.execute("INSERT INTO users(id,email,password_hash,full_name,role,pillar) VALUES (%s,%s,'x','n','reviewer','business') ON CONFLICT DO NOTHING", (f"t5{u}", f"t5{u}@e.org"))
-        for it in ("t5a", "t5b", "t5c"):
+            c.execute("INSERT INTO users(id,email,password_hash,full_name,role,pillar) VALUES (%s,%s,'x','n','reviewer','business') ON CONFLICT DO NOTHING", (f"t5{x}{u}", f"t5{x}{u}@e.org"))
+        for it in (f"t5{x}a", f"t5{x}b", f"t5{x}c"):
             c.execute("INSERT INTO ai_review_items(item_id,kind,language,source_ref,payload) VALUES (%s,'translation','fon','t','{}') ON CONFLICT DO NOTHING", (it,))
         ins = "INSERT INTO ai_reviews(review_id,item_id,reviewer_id,decision) VALUES (%s,%s,%s,%s)"
-        c.execute(ins, ("t5r1", "t5a", "t5u1", "accept"))
-        assert c.execute("SELECT status FROM ai_review_items WHERE item_id='t5a'").fetchone()[0] == "in_review"
-        c.execute(ins, ("t5r2", "t5a", "t5u2", "accept"))
-        assert c.execute("SELECT status FROM ai_review_items WHERE item_id='t5a'").fetchone()[0] == "validated"
-        with pytest.raises(psycopg.errors.UniqueViolation): c.execute(ins, ("t5r3", "t5a", "t5u1", "reject"))
-        c.execute(ins, ("t5r4", "t5b", "t5u1", "accept")); c.execute(ins, ("t5r5", "t5b", "t5u2", "reject"))
-        assert c.execute("SELECT status FROM ai_review_items WHERE item_id='t5b'").fetchone()[0] == "disputed"
-        c.execute(ins, ("t5r6", "t5c", "t5u1", "reject")); c.execute(ins, ("t5r7", "t5c", "t5u3", "reject"))
-        assert c.execute("SELECT status FROM ai_review_items WHERE item_id='t5c'").fetchone()[0] == "rejected"
-        with pytest.raises(psycopg.errors.CheckViolation): c.execute(ins, ("t5r8", "t5c", "t5u2", "maybe"))
+        c.execute(ins, (f"t5{x}r1", f"t5{x}a", f"t5{x}u1", "accept"))
+        assert c.execute("SELECT status FROM ai_review_items WHERE item_id=%s", (f"t5{x}a",)).fetchone()[0] == "in_review"
+        c.execute(ins, (f"t5{x}r2", f"t5{x}a", f"t5{x}u2", "accept"))
+        assert c.execute("SELECT status FROM ai_review_items WHERE item_id=%s", (f"t5{x}a",)).fetchone()[0] == "validated"
+        with pytest.raises(psycopg.errors.UniqueViolation): c.execute(ins, (f"t5{x}r3", f"t5{x}a", f"t5{x}u1", "reject"))
+        c.execute(ins, (f"t5{x}r4", f"t5{x}b", f"t5{x}u1", "accept")); c.execute(ins, (f"t5{x}r5", f"t5{x}b", f"t5{x}u2", "reject"))
+        assert c.execute("SELECT status FROM ai_review_items WHERE item_id=%s", (f"t5{x}b",)).fetchone()[0] == "disputed"
+        c.execute(ins, (f"t5{x}r6", f"t5{x}c", f"t5{x}u1", "reject")); c.execute(ins, (f"t5{x}r7", f"t5{x}c", f"t5{x}u3", "reject"))
+        assert c.execute("SELECT status FROM ai_review_items WHERE item_id=%s", (f"t5{x}c",)).fetchone()[0] == "rejected"
+        with pytest.raises(psycopg.errors.CheckViolation): c.execute(ins, (f"t5{x}r8", f"t5{x}c", f"t5{x}u2", "maybe"))
         k = c.execute("SELECT items_double_relus, kappa FROM ai_review_agreement WHERE kind='translation' AND language='fon'").fetchone()
         a = [r[0] for r in c.execute("SELECT decision_1 FROM ai_review_pairs WHERE kind='translation' AND language='fon' ORDER BY item_id")]
         b = [r[0] for r in c.execute("SELECT decision_2 FROM ai_review_pairs WHERE kind='translation' AND language='fon' ORDER BY item_id")]
         assert k[0] == len(a) and abs(k[1] - cohen_kappa(a, b)) < 1e-9
-        assert c.execute("SELECT COUNT(*) FROM ai_review_audit WHERE item_id LIKE 't5%'").fetchone()[0] >= 6
-        with pytest.raises(psycopg.errors.RaiseException): c.execute("DELETE FROM ai_review_audit WHERE item_id='t5a'")
+        assert c.execute("SELECT COUNT(*) FROM ai_review_audit WHERE item_id LIKE %s", (f"t5{x}%",)).fetchone()[0] >= 6
+        with pytest.raises(psycopg.errors.RaiseException): c.execute("DELETE FROM ai_review_audit WHERE item_id=%s", (f"t5{x}a",))
