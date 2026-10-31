@@ -1361,6 +1361,9 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
   });
 
   it('SEC-5. Missing, placeholder, or weak production SESSION_SECRET fails fast; a strong secret is accepted', async () => {
+    // Isolate from any SESSION_SECRET present in the environment (e.g. CI's ephemeral secret):
+    // passing `undefined` falls back to process.env.SESSION_SECRET by design.
+    await withEnv({ SESSION_SECRET: undefined }, async () => {
     expect(() => validateSessionSecretConfig(undefined, 'production')).toThrow(/missing/i);
     expect(() => validateSessionSecretConfig('', 'production')).toThrow(/missing/i);
     expect(() =>
@@ -1372,6 +1375,7 @@ describe('SOLOB+ Comprehensive Verification Suite (All 15 Required Directive Tes
     // Startup path (DB readiness) also fails fast
     await withEnv({ NODE_ENV: 'production', SESSION_SECRET: undefined }, async () => {
       await expect(resetDbInstanceForTests('memory://')).rejects.toThrow(/SESSION_SECRET/);
+    });
     });
   });
 
