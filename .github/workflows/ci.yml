@@ -139,3 +139,51 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: for f in $(ls db/migrations/0*.sql | sort); do echo "applying $f"; psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
       - run: mvn -B test
+
+  docker-smoke:
+    name: Docker images (buildx, no push) + compose smoke
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: polyglot}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Generate ephemeral CI-only .env (random, never real values, never committed)
+        run: |
+          pw=$(openssl rand -hex 16); echo "::add-mask::$pw"
+          { echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"; echo "SESSION_SECRET=$(openssl rand -hex 32)";
+            echo "SERVICE_SECRET=$(openssl rand -hex 32)"; echo "APP_ENV=staging"; } > .env
+          echo "SMOKE_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
+      - name: Build all images with buildx (gateway Rust, School Python+C++, Business Java)
+        run: docker buildx bake -f docker-compose.yml --load gateway school business
+      - name: Images run as non-root and declare a HEALTHCHECK
+        run: |
+          for i in gateway school business; do
+            u=$(docker image inspect solob-plus/$i:local --format '{{.Config.User}}')
+            hc=$(docker image inspect solob-plus/$i:local --format '{{if .Config.Healthcheck}}yes{{end}}')
+            echo "$i user=$u healthcheck=$hc"; [ -n "$u" ] && [ "$u" != root ] && [ "$u" != 0 ] && [ "$hc" = yes ]
+          done
+      - name: Start stack (PG16 -> migrate -> school/business healthy -> gateway)
+        run: |
+          docker compose --env-file .env up -d --no-build gateway
+          for n in $(seq 1 60); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose --env-file .env ps -q gateway)" 2>/dev/null || true)
+            [ "$s" = healthy ] && { echo "gateway healthy after ~$((n*3))s"; docker compose --env-file .env ps -a; exit 0; }; sleep 3
+          done; echo "gateway not healthy"; exit 1
+      - name: Bootstrap the one-time admin (CLI, idempotency guarded by the DB)
+        run: >-
+          docker compose --env-file .env run --rm --no-deps
+          -e BOOTSTRAP_ADMIN_EMAIL=smoke.admin@example.org -e BOOTSTRAP_ADMIN_PASSWORD -e BOOTSTRAP_ADMIN_NAME="CI Smoke Admin"
+          gateway bootstrap-admin
+        env: {BOOTSTRAP_ADMIN_PASSWORD: '${{ env.SMOKE_ADMIN_PASSWORD }}'}
+      - name: End-to-end smoke through the gateway
+        run: python3 scripts/smoke_e2e.py
+        env: {SMOKE_ADMIN_EMAIL: smoke.admin@example.org, SMOKE_ADMIN_PASSWORD: '${{ env.SMOKE_ADMIN_PASSWORD }}'}
+      - name: Demo seed, run twice (idempotent)
+        run: python3 scripts/seed_demo.py && python3 scripts/seed_demo.py
+        env: {SEED_ADMIN_EMAIL: smoke.admin@example.org, SEED_ADMIN_PASSWORD: '${{ env.SMOKE_ADMIN_PASSWORD }}'}
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --env-file .env ps -a; docker compose --env-file .env logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env down -v
