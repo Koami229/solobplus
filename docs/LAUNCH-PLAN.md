@@ -49,6 +49,14 @@ Point d'attention : `main` contient encore l'application Next.js/TypeScript d'or
 - **Approbation :** fournisseur IA, retrait du JS de main, données de seed.
 
 ## Phase C — Système de contributions et groupe de validateurs
+
+> **État (branche `launch/phase-c-contributions`)** — implémenté : migration additive opt-in `db/migrations-ai/006_contributions.sql`
+> (contributions CC BY 4.0 avec consentement versionné et horodaté, accord parental pour mineurs, double validation via la file 005,
+> réputation, signalements, « réponse utile » School, vue porte des droits `contributions_exportable`), pages Rust `/contribute`
+> (CSRF, RBAC, CSP, rate limit, filtre de contenu, retrait sans suppression), endpoint School `POST /feedback`, export
+> `python -m solob_ai.contrib.export` (re-vérification Python, lecture seule). Non fait : votes pondérés, rôle `lang_lead` par langue
+> (la modération est réservée à `admin`).
+
 - **Objectif :** les utilisateurs proposent du texte, des traductions ou des corrections dans leurs langues, avec un consentement explicite, et des validateurs vérifient.
 - **Éléments :**
   - consentement horodaté et versionné ;

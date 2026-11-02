@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{admin, admin_ui, review_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{admin, admin_ui, review_ui, contribute_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -44,6 +44,8 @@ pub fn router(state: AppState) -> Router {
         .route("/review", get(review_ui::ui_review))
         .route("/review/item/:id", get(review_ui::ui_review_item))
         .route("/review/:action", post(review_ui::ui_review_action))
+        .route("/contribute", get(contribute_ui::ui_contribute))
+        .route("/contribute/:action", post(contribute_ui::ui_contribute_action))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
         .layer(middleware::from_fn(move |req: Request, next: Next| async move {
             let mut res = next.run(req).await;

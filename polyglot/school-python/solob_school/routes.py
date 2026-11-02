@@ -54,6 +54,11 @@ class GenerateIn(BaseModel):
     difficulty: Optional[str] = None
     materialType: Optional[str] = None
 
+class FeedbackIn(BaseModel):
+    materialId: str = Field(default="", max_length=64)
+    helpful: Optional[bool] = None
+    comment: str = Field(default="", max_length=2000)
+
 class SubmitIn(BaseModel):
     exerciseId: str = Field(default="", max_length=64)
     answers: dict[str, str] = Field(default_factory=dict)
@@ -321,6 +326,25 @@ def register(app: FastAPI, db_url_fn: Callable[[], str], actor_dep, any_role_act
                      {"exerciseId": ex["id"], "submissionId": sid, "score": total, "maxScore": max_score, "percentage": pct, "grader": "cpp"})
             s = c.execute("SELECT * FROM school_exercise_submissions WHERE id=%s", (sid,)).fetchone()
         return {"ok": True, "submission": s}
+
+    @app.post("/feedback")
+    def feedback(body: FeedbackIn, a=Depends(actor_dep)):
+        """« Réponse utile » sur une réponse IA (school_study_materials). Table créée par db/migrations-ai/006 (opt-in)."""
+        if body.helpful is None: raise AppError(400, "INVALID_FEEDBACK", "helpful must be true or false.")
+        rate_limit(f"feedback:{a.id}", 30)
+        with conn() as c:
+            if not c.execute("SELECT to_regclass('public.ai_answer_feedback') IS NOT NULL AS ok").fetchone()["ok"]:
+                raise AppError(503, "FEEDBACK_MODULE_DISABLED", "Feedback module not enabled (migration 006 not applied).")
+            m = c.execute("SELECT user_id FROM school_study_materials WHERE id=%s", (body.materialId,)).fetchone()
+            if not m: raise AppError(404, "MATERIAL_NOT_FOUND", "AI answer not found.")
+            if m["user_id"] != a.id:
+                audit(c, a, "AI_ANSWER_FEEDBACK", "STUDY_MATERIAL", body.materialId, "DENIED", {"reason": "not_owner"}); c.commit()
+                raise AppError(403, "FORBIDDEN_MATERIAL_ACCESS", "You can only rate your own AI answers.")
+            f = c.execute("""INSERT INTO ai_answer_feedback (feedback_id,user_id,material_id,helpful,comment) VALUES (%s,%s,%s,%s,%s)
+                             ON CONFLICT (user_id, material_id) DO UPDATE SET helpful=EXCLUDED.helpful, comment=EXCLUDED.comment, updated_at=NOW()
+                             RETURNING feedback_id, material_id, helpful, comment""", (nid("fbk"), a.id, body.materialId, body.helpful, body.comment.strip())).fetchone()
+            audit(c, a, "AI_ANSWER_FEEDBACK", "STUDY_MATERIAL", body.materialId, "SUCCESS", {"helpful": body.helpful})
+        return {"ok": True, "feedback": f}
 
     @app.get("/workspace")
     def workspace(a=Depends(actor_dep)):
