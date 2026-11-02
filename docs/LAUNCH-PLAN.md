@@ -87,6 +87,12 @@ Point d'attention : `main` contient encore l'application Next.js/TypeScript d'or
 - **Objectif :** exposer `POST /generate` en local (127.0.0.1), attendu par `local_provider.py`.
 - **Choix :** Rust (axum + candle) ou C++ (export ONNX / ggml). Recommandation : Rust, déjà utilisé par la passerelle.
 - **Fichiers :** `polyglot/solob-local-rs/` et `tools/export_weights.py` (vers safetensors).
+- **Statut (2026-11-02, branche `launch/phase-e-solob-local`) :** implémenté — Rust/axum/candle CPU, boucle locale,
+  désactivé par défaut, limites + délai, journaux sans contenu, healthcheck, Dockerfile distroless non-root,
+  profil compose `solob-local` optionnel. Parité vérifiée localement : smoke-d1 |Δlogits| max = 1,34e-5
+  (6 prompts, 264 000 logits), fixture aléatoire 1,8e-7 ; glouton identique. Réponses marquées EXPÉRIMENTAL
+  (modèle 3,4 M paramètres inutile en pratique). Consentement `contrib-v2` ajouté (008, additif).
+  Non vérifié : image Docker construite localement (pas de Docker sur la machine de dev ; vérifiée par la CI).
 - **Tests :** parité des logits avec PyTorch (tolérance 1e-4), limites (512 tokens, délai), charge, refus des adresses non locales.
 - **Risques :** qualité actuelle du modèle insuffisante (benchmark 0,0) : rester derrière le drapeau et marquer « brouillon ».
 - **Approbation :** activation du drapeau en préproduction.

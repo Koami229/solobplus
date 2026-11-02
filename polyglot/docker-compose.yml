@@ -58,9 +58,31 @@ services:
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: *db_url
       SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+      # Fournisseur expérimental solob-local : DÉSACTIVÉ par défaut (mode démo). Voir le profil « solob-local » ci-dessous.
+      SOLOB_LOCAL_ENABLED: ${SOLOB_LOCAL_ENABLED:-0}
+      SOLOB_LOCAL_URL: ${SOLOB_LOCAL_URL:-}
     volumes: [storage:/data/storage]
     tmpfs: [/tmp]
     depends_on: {migrate: {condition: service_completed_successfully}}
+  solob-local:  # EXPÉRIMENTAL, profil désactivé par défaut : docker compose --profile solob-local up
+    # Partage l'espace réseau de « school » : écoute 127.0.0.1:8300, joignable UNIQUEMENT par school (boucle locale),
+    # jamais publié sur l'hôte. Activer côté School : SOLOB_LOCAL_ENABLED=1 SOLOB_LOCAL_URL=http://127.0.0.1:8300/generate
+    profiles: ["solob-local"]
+    image: solob-plus/solob-local:local
+    build: {context: .., dockerfile: polyglot/solob-local-rs/Dockerfile}
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    network_mode: "service:school"
+    environment:
+      SOLOB_LOCAL_SERVE: "1"
+      SOLOB_LOCAL_BIND: 127.0.0.1:8300
+      SOLOB_LOCAL_MODEL_DIR: /models
+    volumes: ["${SOLOB_LOCAL_MODEL_HOST_DIR:-./solob-ai/artifacts/solob-local/promoted}:/models:ro"]
+    mem_limit: 1g
+    cpus: 2
+    depends_on: {school: {condition: service_started}}
   business:  # Java 21 — internal only
     <<: *common
     image: solob-plus/business:local
