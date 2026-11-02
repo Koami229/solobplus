@@ -74,6 +74,7 @@ Point d'attention : `main` contient encore l'application Next.js/TypeScript d'or
 - **Approbation :** texte de consentement, licence, règles de modération, recrutement des validateurs.
 
 ## Phase D — Boucle de réentraînement avec garde-fou benchmark
+- **Statut :** implémentée sur `launch/phase-d-retraining` (voir `polyglot/solob-ai/docs/PHASE-D-RETRAINING.md`). Fumée CPU seulement ; aucun entraînement massif, rien de déployé.
 - **Objectif :** réentraînement périodique sur les données validées. Un modèle n'est promu que s'il ne régresse sur aucune langue.
 - **Règle :** BPC sur le held-out commun figé, ne dégrade aucune langue de plus de 0,02, et améliore la moyenne par langue. Benchmark brouillon NON PUBLIABLE tant qu'il n'est pas validé humainement. Ablations A0–A6 d'abord (voir `NEXT-TRAINING-PLAN.md`).
 - **Fichiers :** `solob_ai/pipeline/retrain.py`, `promote.py`, manifeste sha256 de chaque modèle, `configs/`.
