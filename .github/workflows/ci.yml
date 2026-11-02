@@ -219,7 +219,7 @@ jobs:
         with: {python-version: '3.12'}
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
       - name: Reference stack (PyTorch CPU) for the parity fixture
-        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu sentencepiece==0.2.2 safetensors==0.8.0 numpy==2.5.4
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu sentencepiece==0.2.2 safetensors==0.8.0 numpy==2.5.4 pyyaml==6.0.3
       - name: Export a random-init fixture (no real weights in CI)
         working-directory: polyglot/solob-local-rs
         run: python tools/export_weights.py --random-init --out "$RUNNER_TEMP/slfix"
