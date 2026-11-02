@@ -182,11 +182,8 @@ def test_007_marks_only_eligible_once_and_audit_is_append_only():
         for f in sorted((DB / "migrations").glob("00*.sql")): c.execute(f.read_text())
         for f in sorted((DB / "migrations-ai").glob("00*.sql")): c.execute(f.read_text())
         c.execute((DB / "migrations-ai/007_training_usage.sql").read_text())  # idempotente
-        cols = {r[0] for r in c.execute("select column_name from information_schema.columns where table_name='users'")}
         uid = f"u{x}"
-        vals = {"id": uid, "email": f"{x}@t.io", "name": "T", "password_hash": "x", "role": "STUDENT"}
-        vals = {k: v for k, v in vals.items() if k in cols}
-        c.execute(f"insert into users({','.join(vals)}) values ({','.join(['%s'] * len(vals))})", list(vals.values()))
+        c.execute("INSERT INTO users(id,email,password_hash,full_name,role,pillar) VALUES (%s,%s,'x','n','student','school')", (uid, f"{x}@t.io"))
         ver = c.execute("select version from contribution_consent_texts limit 1").fetchone()
         assert ver, "texte de consentement attendu (graine 006)"
         for i, st in ((1, "approved"), (2, "pending")):
