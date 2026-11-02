@@ -210,6 +210,8 @@ jobs:
   solob-local:
     name: solob-local (Rust, candle) — parity vs PyTorch + API + School e2e
     runs-on: ubuntu-latest
+    # sentencepiece-sys 0.11.3 vendors sentencepiece sources that miss <cstdint> for newer GCC (bookworm's GCC 12 is fine)
+    env: {CXXFLAGS: -include cstdint}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
