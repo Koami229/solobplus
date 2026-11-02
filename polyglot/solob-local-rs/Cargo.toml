@@ -1,0 +1,36 @@
+[package]
+name = "solob-local"
+version = "0.1.0"
+edition = "2021"
+description = "SOLOB AI local inference server (experimental, CPU, loopback only)"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "solob-local"
+path = "src/main.rs"
+
+[dependencies]
+candle-core = "0.9"
+candle-nn = "0.9"
+sentencepiece = "0.11"
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower = { version = "0.5", features = ["limit", "timeout", "util"] }
+tower-http = { version = "0.6", features = ["limit", "timeout"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+anyhow = "1"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+codegen-units = 1
