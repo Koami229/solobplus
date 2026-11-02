@@ -1,0 +1,14 @@
+# Phase D — fumée CPU (quelques minutes). Même pilote que le GPU ; seul ce fichier change (voir retrain_gpu.yaml).
+# Initialisé depuis v1 (lecture seule), tokenizer v1 figé, mélange rééquilibré par température.
+run_id: smoke-d1
+parent_tokens: artifacts/data_v1
+tokenizer: artifacts/toklab_v1/unigram_8000.model
+init_from: artifacts/run_cpu_v1/last.pt
+sakc: data/sakc
+deltas: []            # ex. [v1.1] après `python -m solob_ai.pipeline.ingest --export contributions.jsonl`
+mix: {temperature: 3.0, floor: 0.05, cap: 0.25}
+registry: artifacts/registry/models.jsonl
+audit: artifacts/registry/training_audit.jsonl
+train: {device: cpu, dtype: float32, threads: 6, seed: 1234, batch_size: 16, seq_len: 256, lr: 0.0003,
+        warmup_steps: 20, max_steps: 200, max_minutes: 10, eval_every: 100, eval_batches: 10, ckpt_every: 1000,
+        out_dir: artifacts/candidates/smoke-d1}

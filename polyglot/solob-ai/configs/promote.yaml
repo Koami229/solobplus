@@ -1,0 +1,12 @@
+# Porte de promotion Phase D (docs/LAUNCH-PLAN.md) : BPC sur le held-out figé SAKC v1 test.
+heldout: data/sakc/v1/test.jsonl
+heldout_sha256: 056df99fe75741f9e9c41903f5479a6a2d6ba9085b560bea2389fbdad912dbbc   # SAKC v1 test figé ; toute modification bloque la comparaison
+max_docs_per_lang: null       # null = held-out complet
+baseline: {id: v1, checkpoint: artifacts/run_cpu_v1/last.pt, tokenizer: artifacts/toklab_v1/unigram_8000.model}
+registry: artifacts/registry/models.jsonl
+reports_dir: artifacts/registry/reports
+gate:
+  priority: [fon, yo, ha, wo, ig, sw, fr, en]   # toutes les langues sont gardées ; fon/yo/ha/wo/ig sont la priorité Mission 3
+  max_regression: 0.02                          # BPC ; aucune langue prioritaire ne peut se dégrader davantage
+  min_avg_gain: 0.0                             # la moyenne pondérée doit strictement s'améliorer
+  weights: {fon: 2, yo: 2, ha: 2, wo: 2, ig: 2, sw: 1, fr: 1, en: 1}
