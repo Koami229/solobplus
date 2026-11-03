@@ -1,0 +1,14 @@
+# MÊME PILOTE sur GPU cloud gratuit (ex. Kaggle) — NON EXÉCUTÉ ici (budget 0 $, aucun service payant).
+# Lancement soumis à l'accord du propriétaire (« aucun entraînement massif sans validation préalable »).
+run_id: gpu-d1
+parent_tokens: artifacts/data_v1
+tokenizer: artifacts/toklab_v1/unigram_8000.model
+init_from: artifacts/run_cpu_v1/last.pt
+sakc: data/sakc
+deltas: []
+mix: {temperature: 3.0, floor: 0.05, cap: 0.25}
+registry: artifacts/registry/models.jsonl
+audit: artifacts/registry/training_audit.jsonl
+train: {device: cuda, dtype: bfloat16, threads: 8, seed: 1234, batch_size: 64, seq_len: 256, lr: 0.0006,
+        warmup_steps: 200, max_steps: 6000, max_minutes: 600, eval_every: 500, eval_batches: 50, ckpt_every: 1000,
+        out_dir: artifacts/candidates/gpu-d1, compile: true}
