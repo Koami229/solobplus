@@ -1,15 +1,17 @@
 # Local topology only — NOT DEPLOYED. Secrets come from an untracked .env file
 # (POSTGRES_PASSWORD, SESSION_SECRET, SERVICE_SECRET >= 32 chars); nothing secret is committed.
-# Usage: docker compose --env-file .env up --build   (gateway on http://127.0.0.1:8100)
+# Usage: docker compose --env-file .env up --build --wait   (gateway on http://127.0.0.1:8100)
+# Smoke test / demo seed: see polyglot/SMOKE.md (adds docker-compose.smoke.yml, non-production).
 x-common: &common
   restart: unless-stopped
   read_only: true
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
   networks: [internal]
+x-db-url: &db_url postgres://solob:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/solob
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     environment:
       POSTGRES_USER: solob
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
@@ -17,12 +19,26 @@ services:
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck: {test: ["CMD-SHELL","pg_isready -U solob"], interval: 5s, retries: 20}
     networks: [internal]
+  migrate:   # one-shot: applies db/migrations/0*.sql (additive, idempotent, advisory-locked) then exits
+    <<: *common
+    restart: "no"
+    image: solob-plus/gateway:local
+    build: {context: .., dockerfile: polyglot/gateway-rust/Dockerfile}
+    command: ["migrate"]
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: *db_url
+      SESSION_SECRET: ${SESSION_SECRET:?set in .env}
+      SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+    healthcheck: {disable: true}
+    depends_on: {postgres: {condition: service_healthy}}
   gateway:   # Rust: auth, sessions, CSRF, RBAC, rate limit, admin, UI, reverse proxy
     <<: *common
-    build: ./gateway-rust
+    image: solob-plus/gateway:local
+    build: {context: .., dockerfile: polyglot/gateway-rust/Dockerfile}
     environment:
-      APP_ENV: production
-      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: *db_url
       SESSION_SECRET: ${SESSION_SECRET:?set in .env}
       SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
       SCHOOL_SERVICE_URL: http://school:8101
@@ -30,28 +46,33 @@ services:
       BIND_ADDR: 0.0.0.0:8100
       PAYMENT_PROVIDER: disabled
     ports: ["127.0.0.1:8100:8100"]
-    depends_on: {postgres: {condition: service_healthy}, school: {condition: service_started}, business: {condition: service_started}}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      school: {condition: service_healthy}
+      business: {condition: service_healthy}
   school:    # Python FastAPI + C++ grader — internal only
     <<: *common
+    image: solob-plus/school:local
     build: {context: ., dockerfile: school-python/Dockerfile}
     environment:
-      APP_ENV: production
-      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: *db_url
       SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
     volumes: [storage:/data/storage]
     tmpfs: [/tmp]
-    depends_on: {postgres: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
   business:  # Java 21 — internal only
     <<: *common
+    image: solob-plus/business:local
     build: ./business-java
     environment:
-      APP_ENV: production
-      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: *db_url
       SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
       PAYMENT_PROVIDER: disabled
     volumes: [storage:/data/storage]
     tmpfs: [/tmp]
-    depends_on: {postgres: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
 networks:
   internal: {}
 volumes:

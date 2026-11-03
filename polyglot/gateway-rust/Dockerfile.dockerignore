@@ -1,0 +1,6 @@
+# Allowlist for the repo-root build context of polyglot/gateway-rust/Dockerfile (BuildKit per-Dockerfile ignore).
+*
+!db/migrations/*.sql
+!polyglot/gateway-rust/Cargo.toml
+!polyglot/gateway-rust/Cargo.lock
+!polyglot/gateway-rust/src/**
