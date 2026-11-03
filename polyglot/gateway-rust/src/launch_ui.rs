@@ -17,7 +17,7 @@ pub const EXAM_GRACE_S: i64 = 30;
 /// Délai défini de traitement d'une demande de suppression de compte (P02).
 pub const DELETION_DUE_DAYS: i64 = 30;
 pub const TALENT_PASS: i32 = 2;
-const STAFF: &[&str] = &["reviewer", "operator", "admin"];
+pub(crate) const STAFF: &[&str] = &["reviewer", "operator", "admin"];
 /// Test de compétences du parcours talent (corrigé côté serveur, réponses jamais envoyées).
 pub const TALENT_TEST: &[(&str, &[&str], usize)] = &[
     ("Une annotation de qualité doit être :", &["rapide avant tout", "cohérente avec le guide d'annotation", "la plus longue possible"], 1),
@@ -25,21 +25,22 @@ pub const TALENT_TEST: &[(&str, &[&str], usize)] = &[
     ("Une donnée personnelle dans un texte à traduire doit être :", &["signalée et masquée selon la consigne", "publiée", "ignorée"], 0),
 ];
 
-fn html(status: u16, body: String) -> Response {
+pub(crate) fn html(status: u16, body: String) -> Response {
     (StatusCode::from_u16(status).unwrap_or(StatusCode::OK), [(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
 }
-fn page(title: &str, body: &str) -> String { crate::ui::page(title, body) }
-fn err_page(title: &str, back: &str, e: AppError) -> Response {
+pub(crate) fn page(title: &str, body: &str) -> String { crate::ui::page(title, body) }
+pub(crate) fn err_page(title: &str, back: &str, e: AppError) -> Response {
     html(e.status, page(title, &format!("<div class=\"card\"><h1>{}</h1><p class=\"err\">{}</p><p><a href=\"{back}\">Retour</a></p></div>", esc(title), esc(&e.message))))
 }
-fn flash(m: &str) -> String { format!("<div class=\"card ok\" role=\"status\">{}</div>", esc(m)) }
+pub(crate) fn flash(m: &str) -> String { format!("<div class=\"card ok\" role=\"status\">{}</div>", esc(m)) }
 /// Convertit les refus des triggers/contraintes de 009 en erreurs métier lisibles (sinon 500 générique).
-fn dbe(e: sqlx::Error) -> AppError {
+pub(crate) fn dbe(e: sqlx::Error) -> AppError {
     let m = e.to_string();
     if m.contains("SELF_REVIEW") { return AppError::new(403, "SELF_REVIEW_FORBIDDEN", "Auto-revue interdite : un autre relecteur doit valider."); }
     if m.contains("STEP_ORDER") { return AppError::new(409, "STEP_ORDER", "Étape refusée : l'étape précédente n'est pas validée."); }
     if m.contains("NOT_BADGED") { return AppError::new(409, "NOT_BADGED", "Seul un talent badgé peut figurer dans une shortlist."); }
     if m.contains("client_requests_slot_uq") { return AppError::new(409, "SLOT_TAKEN", "Ce créneau est déjà réservé, choisissez-en un autre."); }
+    if m.contains("QUOTE_STATUS") { return AppError::new(403, "QUOTE_STATUS", "Le statut d'un devis est géré par l'équipe SOLOB."); }
     if m.contains("row-level security") { return AppError::new(403, "RLS_DENIED", "Accès refusé à cet espace."); }
     AppError::from(e)
 }
@@ -56,17 +57,17 @@ async fn enabled(s: &AppState) -> Result<(), AppError> {
     let ok: bool = sqlx::query_scalar("SELECT to_regclass('public.school_mock_exams') IS NOT NULL AND to_regclass('public.client_shortlists') IS NOT NULL").fetch_one(&s.pool).await?;
     if ok { Ok(()) } else { Err(AppError::new(503, "LAUNCH_MODULE_DISABLED", "Module non activé (migration 009 non appliquée).")) }
 }
-async fn session(s: &AppState, hm: &HeaderMap, roles: &[&str], pillar: &str, op: &str) -> Result<(rbac::AuthUser, String), AppError> {
+pub(crate) async fn session(s: &AppState, hm: &HeaderMap, roles: &[&str], pillar: &str, op: &str) -> Result<(rbac::AuthUser, String), AppError> {
     enabled(s).await?;
     let tok = h::session_token(hm);
     let u = crate::auth::authenticate(&s.pool, &s.cfg, tok.as_deref()).await?;
     rbac::check_role(u.as_ref(), roles, pillar, op)?;
     Ok((u.unwrap(), tok.unwrap()))
 }
-fn hidden(s: &AppState, tok: &str) -> String {
+pub(crate) fn hidden(s: &AppState, tok: &str) -> String {
     format!("<input type=\"hidden\" name=\"csrf\" value=\"{}\">", esc(&crypto::derive_csrf_token(&s.cfg.session_secret, tok)))
 }
-fn check_post(s: &AppState, hm: &HeaderMap, tok: &str, f: &HashMap<String, String>) -> Result<(), AppError> {
+pub(crate) fn check_post(s: &AppState, hm: &HeaderMap, tok: &str, f: &HashMap<String, String>) -> Result<(), AppError> {
     let csrf = f.get("csrf").map(String::as_str).unwrap_or("");
     h::enforce_csrf(&Method::POST, hm, Some(csrf))?;
     if !crypto::verify_csrf_token(&s.cfg.session_secret, tok, csrf) { return Err(AppError::new(403, "CSRF_VALIDATION_FAILED", "Invalid CSRF token.")); }
@@ -351,7 +352,7 @@ pub async fn ui_talent_action(State(s): State<AppState>, Path(action): Path<Stri
 
 // ===================== C01 / C02 : demande client, appel, shortlist =====================
 const CL_T: &str = "SOLOB Business — Espace client";
-const CLIENT_ROLES: &[&str] = &["org_client", "reviewer", "operator", "admin"];
+pub(crate) const CLIENT_ROLES: &[&str] = &["org_client", "reviewer", "operator", "admin"];
 
 /// Créneau d'appel de 15 min saisi à l'heure du Bénin : jours ouvrés, 09:00–16:45, quarts d'heure, au moins 2 h à l'avance.
 pub fn parse_slot(v: &str, now: DateTime<Utc>) -> Result<DateTime<Utc>, AppError> {
@@ -416,7 +417,7 @@ async fn client_page(s: &AppState, u: &rbac::AuthUser, tok: &str, fl: Option<Str
         }
         out += "</div>";
     }
-    out += "</div><p><a href=\"/business\">Retour à Business</a></p>";
+    out += "</div><p><a href=\"/enterprise/quotes\">Demander un devis (tarification sur devis)</a> · <a href=\"/business\">Retour à Business</a></p>";
     Ok(page(CL_T, &out))
 }
 

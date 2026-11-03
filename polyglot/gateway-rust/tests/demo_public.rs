@@ -101,3 +101,15 @@ async fn https_mode_adds_hsts() {
     assert!(hm["strict-transport-security"].to_str().unwrap().contains("max-age="));
     assert!(!get(&router(), "/demo").await.1.contains_key("strict-transport-security"));
 }
+
+#[tokio::test]
+async fn business_demo_shows_quote_on_request_and_no_public_price_grid() {
+    let r = router();
+    let mut sur_devis = false;
+    for (s, _, _) in demo::BUSINESS {
+        let (_, _, b) = get(&r, &format!("/demo/business/{s}")).await;
+        assert!(!b.contains("FCFA") && !b.contains("€") && !b.contains("XOF"), "grille de prix publique sur /demo/business/{s}");
+        sur_devis |= b.contains("Sur devis");
+    }
+    assert!(sur_devis, "la démo doit afficher « Sur devis »");
+}

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 SCHOOL_ROLES = {"student", "teacher", "admin"}
 
 from .errors import AppError
-from . import routes, db
+from . import routes, db, wave3
 ALL_ROLES = SCHOOL_ROLES | {"contributor", "operator", "reviewer", "org_client"}
 
 class Actor(BaseModel):
@@ -90,6 +90,7 @@ def create_app(database_url: Optional[str] = None, service_secret: Optional[str]
         return Actor(id=x_solob_user_id, role=x_solob_user_role, email=x_solob_user_email)
 
     routes.register(app, lambda: db_url, actor, any_actor)
+    wave3.register(app, lambda: db_url, actor)
 
     @app.get("/health")
     def health():

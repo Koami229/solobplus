@@ -1,5 +1,6 @@
 pub mod app;
 pub mod launch_ui;
+pub mod quotes_ui;
 pub mod audit;
 pub mod auth;
 pub mod config;
