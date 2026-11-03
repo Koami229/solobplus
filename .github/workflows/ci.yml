@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Lint, build, tests (embedded PGlite)
+    name: Legacy Next.js archive — Lint, build, tests (embedded PGlite)
+    defaults: {run: {working-directory: archive/legacy-nextjs}}
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
@@ -20,8 +21,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: archive/legacy-nextjs/package-lock.json
       - name: Generate ephemeral CI-only secret (never a real value)
         run: echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - name: Link shared db/, .env.example and root docs into the archived legacy app
+        run: ln -s ../../db db && ln -s ../../.env.example .env.example && ln -s ../../DEPLOYMENT.md DEPLOYMENT.md && ln -s ../../SECURITY.md SECURITY.md
       - run: npm ci
       - run: npm run lint
       - run: npm run build
@@ -30,7 +34,8 @@ jobs:
       - run: npm test
 
   external-postgres:
-    name: Tests against PostgreSQL 16 (DATABASE_URL)
+    name: Legacy Next.js archive — Tests against PostgreSQL 16 (DATABASE_URL)
+    defaults: {run: {working-directory: archive/legacy-nextjs}}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -53,8 +58,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: archive/legacy-nextjs/package-lock.json
       - name: Generate ephemeral CI-only secret (never a real value)
         run: echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - name: Link shared db/, .env.example and root docs into the archived legacy app
+        run: ln -s ../../db db && ln -s ../../.env.example .env.example && ln -s ../../DEPLOYMENT.md DEPLOYMENT.md && ln -s ../../SECURITY.md SECURITY.md
       - run: npm ci
       - run: npm run db:migrate
       - run: npm test

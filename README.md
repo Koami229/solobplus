@@ -38,23 +38,15 @@ A managed AI operations and qualified talent delivery platform — **not** an op
 
 ## Quick Start
 
+> La pile actuelle (Rust, Python, Java, C++) se trouve dans `polyglot/` (voir `DEPLOYMENT.md`).
+> L'ancienne version TypeScript/Next.js 15 est archivée dans [`archive/legacy-nextjs/`](archive/legacy-nextjs/README.md), non maintenue et non déployée. Les commandes ci-dessous ne concernent que cette archive.
+
 ```bash
-# 1. Install dependencies
+cd archive/legacy-nextjs
+for f in db .env.example DEPLOYMENT.md SECURITY.md; do ln -s ../../$f $f; done; cp .env.example .env   # fichiers partagés restés à la racine
 npm install
-
-# 2. Copy environment template (never commit real secrets)
-cp .env.example .env
-
-# 3. Run PostgreSQL schema migrations
 npm run db:migrate
-
-# 4. Seed clearly labeled synthetic test data (@synthetic.solob.local)
 npm run db:seed
-
-# 5. Run the 15 mandatory automated test suites
 npm test
-
-# 6. Build and start for production
-npm run build
-npm start
+npm run build && npm start
 ```
