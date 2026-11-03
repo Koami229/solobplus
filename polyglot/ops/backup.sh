@@ -2,7 +2,7 @@
 # Daily logical backup (pg_dump -Fc) with rotation (KEEP days) + checksum. Never deletes live data.
 # Off-machine copy: set OFFSITE_DIR to a mounted disk/folder (user decision; see README).
 set -euo pipefail
-S=${STAGING_DIR:-/workspace/staging}; PG=${PG_BIN:-/home/box/tc/pg16/bin}; KEEP=${KEEP:-14}
+S=${STAGING_DIR:-/workspace/staging}; PG=${PG_BIN:-/usr/bin}; KEEP=${KEEP:-14}
 set -a; . $S/.env; set +a
 D=${BACKUP_DIR:-$S/backups}; mkdir -p $D; chmod 700 $D
 f=$D/solob-$(date +%Y%m%d-%H%M%S).dump

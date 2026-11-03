@@ -20,7 +20,10 @@ while true; do
   fi
   if ! alive cloudflared; then alert "cloudflared down -> restart"; $S/cloudflare/tunnel-start.sh >> $S/logs/watchdog.log 2>&1; fi
   if [ -n "$PUBLIC_URL" ]; then
-    c=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/health"); [ "$c" = 200 ] || alert "public $PUBLIC_URL/api/health -> $c"
+    c=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/health"); if [ "$c" = 200 ]; then pubfail=0; else pubfail=$((${pubfail:-0}+1)); alert "public $PUBLIC_URL/api/health -> $c ($pubfail)"
+      # 530/502 twice in a row while local is healthy = tunnel lost its edge connections: restart cloudflared
+      if [ $pubfail -ge 2 ] && alive cloudflared; then kill "$(cat $S/run/cloudflared.pid)"; sleep 2; rm -f $S/run/cloudflared.pid
+        $S/cloudflare/tunnel-start.sh >> $S/logs/watchdog.log 2>&1 && log "tunnel restarted"; pubfail=0; fi; fi
   fi
   date -Is > $S/run/watchdog.heartbeat
   sleep $INTERVAL

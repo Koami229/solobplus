@@ -50,3 +50,7 @@ npm run db:seed
 npm test
 npm run build && npm start
 ```
+
+## Licence
+
+Propriétaire — tous droits réservés. Voir [LICENSE](LICENSE).
