@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{admin, admin_ui, review_ui, contribute_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{demo, admin, admin_ui, review_ui, contribute_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -46,6 +46,13 @@ pub fn router(state: AppState) -> Router {
         .route("/review/:action", post(review_ui::ui_review_action))
         .route("/contribute", get(contribute_ui::ui_contribute))
         .route("/contribute/:action", post(contribute_ui::ui_contribute_action))
+        .route("/demo", get(demo::hub))
+        .route("/demo/business", get(|| async { Redirect::to("/demo/business/accueil") }))
+        .route("/demo/school", get(|| async { Redirect::to("/demo/school/tableau-de-bord") }))
+        .route("/demo/business/:page", get(demo::business))
+        .route("/demo/school/:page", get(demo::school))
+        .route("/static/demo.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], demo::DEMO_CSS) }))
+        .route("/static/home.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], demo::HOME_CSS) }))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
         .layer(middleware::from_fn(move |req: Request, next: Next| async move {
             let mut res = next.run(req).await;
@@ -208,7 +215,12 @@ fn html(body: String) -> Response { ([(header::CONTENT_TYPE, "text/html; charset
 async fn ui_home(State(s): State<AppState>, hm: HeaderMap) -> Result<Response, AppError> {
     let cu = current_user(&s, &hm).await?;
     let csrf = cu.as_ref().map(|(_, t)| crypto::derive_csrf_token(&s.cfg.session_secret, t));
-    Ok(html(ui::home(cu.as_ref().map(|c| &c.0), csrf.as_deref())))
+    // New public homepage; a signed-in user keeps the account strip (name, role, logout form).
+    let strip = match (cu.as_ref(), csrf.as_deref()) {
+        (Some((u, _)), Some(c)) => Some(ui::account_strip(u, c)),
+        _ => None,
+    };
+    Ok(demo::home(strip))
 }
 async fn ui_login_page() -> Response { html(ui::login(None)) }
 
