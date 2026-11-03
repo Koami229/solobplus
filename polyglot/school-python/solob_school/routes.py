@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional
 import psycopg
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
-from . import grader, grounding, storage
+from . import grader, grounding, storage, local_provider
 from .errors import AppError
 from . import db
 
@@ -116,6 +116,36 @@ def register(app: FastAPI, db_url_fn: Callable[[], str], actor_dep, any_role_act
             return {"aiMode": "MOCK_DEMO", "provider": "mock", "model": MODEL, "uncertaintyLevel": "HIGH", "epistemicNotice": notice,
                     "groundingCitations": citations, "data": data,
                     "usage": {"promptTokens": math.ceil(len(p) / 4), "completionTokens": 120, "estimatedCostUsd": 0, "latencyMs": latency, "status": "FALLBACK_MOCK"}}
+        local_fallback = None
+        if local_provider.enabled():  # fournisseur expérimental, désactivé par défaut (SOLOB_LOCAL_ENABLED)
+            attempts, err = int(os.environ.get("AI_MAX_RETRIES", "2") or 2) + 1, ""
+            for _ in range(attempts):
+                try:
+                    out = local_provider.generate(p); break
+                except local_provider.LocalProviderError as e:
+                    out, err = None, str(e)
+            pt = math.ceil(len(p) / 4); latency = max(1, int((time.monotonic() - start) * 1000))
+            if out is not None:
+                data = build(citations, unc, local_provider.LOCAL_NOTICE)
+                if isinstance(data, dict): data["localModelDraft"] = out["text"]
+                ct = out["completion_tokens"] if out["completion_tokens"] is not None else math.ceil(len(out["text"]) / 4)
+                uid = nid("aiu")
+                c.execute("""INSERT INTO ai_usage_records (id,user_id,pillar,operation,provider,model,is_mock,prompt_tokens,completion_tokens,
+                             estimated_cost_usd,latency_ms,status) VALUES (%s,%s,'school',%s,'solob-local',%s,FALSE,%s,%s,0,%s,'SUCCESS')""",
+                          (uid, a.id, operation, out["model"], pt, ct, latency))
+                return {"aiMode": "LIVE", "provider": "solob-local", "model": out["model"], "experimental": True, "uncertaintyLevel": unc,
+                        "epistemicNotice": local_provider.LOCAL_NOTICE, "groundingCitations": citations, "data": data,
+                        "usage": {"promptTokens": pt, "completionTokens": ct, "estimatedCostUsd": 0, "latencyMs": latency, "status": "SUCCESS"}}
+            uid = nid("aiu"); status = "ERROR" if strict_live else "FALLBACK_MOCK"
+            c.execute("""INSERT INTO ai_usage_records (id,user_id,pillar,operation,provider,model,is_mock,prompt_tokens,completion_tokens,
+                         estimated_cost_usd,latency_ms,status,error_code) VALUES (%s,%s,'school',%s,'solob-local',%s,FALSE,%s,0,0,%s,%s,'UPSTREAM_PROVIDER_FAILURE')""",
+                      (uid, a.id, operation, "solob-local", pt, latency, status))
+            audit(c, a, "AI_PROVIDER_FAILURE_HANDLED", "AI_SERVICE", uid, "ERROR" if strict_live else "SUCCESS",
+                  {"operation": operation, "provider": "solob-local", "attempts": attempts, "errorMessage": err, "fallbackApplied": not strict_live})
+            if strict_live:
+                c.commit()
+                raise AppError(503, "AI_PROVIDER_UNAVAILABLE", f"AI provider failed after {attempts} attempts: {err}")
+            local_fallback = "FALLBACK_MOCK"
         data = build(citations, unc, grounding.MOCK_NOTICE)
         pt, ct = math.ceil(len(p) / 4), math.ceil(len(json.dumps(data, ensure_ascii=False, separators=(",", ":"))) / 4)
         latency = max(1, int((time.monotonic() - start) * 1000))
@@ -124,7 +154,7 @@ def register(app: FastAPI, db_url_fn: Callable[[], str], actor_dep, any_role_act
                   (nid("aiu"), a.id, operation, MODEL, pt, ct, latency))
         return {"aiMode": "MOCK_DEMO", "provider": "mock", "model": MODEL, "uncertaintyLevel": unc, "epistemicNotice": grounding.MOCK_NOTICE,
                 "groundingCitations": citations, "data": data,
-                "usage": {"promptTokens": pt, "completionTokens": ct, "estimatedCostUsd": 0, "latencyMs": latency, "status": "SUCCESS"}}
+                "usage": {"promptTokens": pt, "completionTokens": ct, "estimatedCostUsd": 0, "latencyMs": latency, "status": local_fallback or "SUCCESS"}}
 
     @app.post("/documents", status_code=201)
     def upload_document(body: DocumentIn, a=Depends(actor_dep)):

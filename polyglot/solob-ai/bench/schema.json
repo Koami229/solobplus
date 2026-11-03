@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SOLOB Educational Benchmark item (v0-draft)",
+  "type": "object",
+  "required": ["item_id","track","language","country","level","curriculum_ref","question","reference","source","license","author","status","reviewer_ids","needs_native_speaker"],
+  "properties": {
+    "item_id": {"type": "string", "pattern": "^[a-z_]+-[a-z]{2,3}-\\d{4}$"},
+    "track": {"enum": ["comprehension_linguistique","connaissances_scolaires","mathematiques","sciences","comprehension_curriculum","qualite_explication","fidelite_source","hallucinations"]},
+    "language": {"enum": ["fr","en","fon","yo","ha","sw","wo","ig"]},
+    "country": {"type": "string", "description": "ISO 3166-1 alpha-2, XX = non spécifique"},
+    "level": {"type": "string"},
+    "curriculum_ref": {"type": "string"},
+    "question": {"type": ["string","null"]},
+    "reference": {"description": "réponse de référence (texte ou nombre); null si expected_behavior=abstain ou item à traduire"},
+    "accepted": {"type": "array", "items": {"type": "string"}},
+    "tolerance": {"type": "number", "description": "piste mathematiques / sciences numériques"},
+    "rubric": {"type": "array", "description": "piste qualite_explication", "items": {"type": "object", "required": ["criterion"],
+      "properties": {"criterion": {"type": "string"}, "keywords": {"type": "array"}, "points": {"type": "number"}, "human_only": {"type": "boolean"}}}},
+    "passage": {"type": "string", "description": "piste fidelite_source"},
+    "instruction": {"type": "string"},
+    "expected_behavior": {"enum": ["abstain","correct_premise","answer"], "description": "piste hallucinations"},
+    "source": {"type": "string"},
+    "license": {"enum": ["CC-BY-4.0","CC0-1.0","CC-BY-SA-4.0"]},
+    "author": {"type": "string", "description": "machine-draft ou identifiant d'un auteur humain"},
+    "status": {"enum": ["draft","validated"]},
+    "reviewer_ids": {"type": "array", "items": {"type": "string"}, "description": ">= 2 distincts si validated"},
+    "needs_native_speaker": {"type": "boolean"},
+    "translate_from": {"type": "string"},
+    "notes": {"type": "string"}
+  }
+}

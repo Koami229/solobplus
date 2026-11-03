@@ -1,0 +1,5 @@
+# Prototype CPU (machine actuelle: 8 vCPU, ~3 Gi RAM libre, pas de GPU). ~1–5 M paramètres. v1: même archi/budget que v0, données v1 filtrées + tokenizer v1 unigram 8k.
+model: {vocab_size: 8000, d_model: 192, n_layers: 4, n_heads: 4, d_ff: 768, max_seq_len: 256, dropout: 0.0}
+train: {device: cpu, dtype: float32, threads: 6, seed: 1234, batch_size: 16, seq_len: 256, lr: 0.001,
+        warmup_steps: 100, max_steps: 3000, max_minutes: 55, eval_every: 250, eval_batches: 20, ckpt_every: 250,
+        out_dir: artifacts/run_cpu_v1, data_dir: artifacts/data_v1}
