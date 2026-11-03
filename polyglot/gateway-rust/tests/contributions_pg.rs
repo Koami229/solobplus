@@ -171,3 +171,31 @@ async fn upheld_report_rejects_and_rejection_flow() {
     for i in 0..12 { last = send(&r, form("/contribute/submit", &ck, &sub(&c, &format!("Texte numero {i} pour la limite."), ""))).await.0; }
     assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
 }
+
+const M008: &str = include_str!("../../../db/migrations-ai/008_consent_v2.sql");
+
+#[tokio::test]
+async fn consent_v2_is_additive_and_shown() {
+    let Some(pool) = fresh_db(true).await else { return };
+    let v1_before: String = sqlx::query_scalar("SELECT body FROM contribution_consent_texts WHERE version='contrib-v1'").fetch_one(&pool).await.unwrap();
+    for _ in 0..2 { sqlx::raw_sql(M008).execute(&pool).await.unwrap(); }  // idempotente
+    let v1_after: String = sqlx::query_scalar("SELECT body FROM contribution_consent_texts WHERE version='contrib-v1'").fetch_one(&pool).await.unwrap();
+    assert_eq!(v1_before, v1_after, "contrib-v1 ne doit jamais être modifié");
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM contribution_consent_texts").fetch_one(&pool).await.unwrap(); assert_eq!(n, 2);
+    // Les textes publiés restent immuables (trigger de 006).
+    assert!(sqlx::query("UPDATE contribution_consent_texts SET body='x' WHERE version='contrib-v2'").execute(&pool).await.is_err());
+    let r = router(&pool);
+    let (ck, c, uid) = user(&r, &pool, "v2@e.org", "student").await;
+    let (st, _, b, _) = send(&r, get("/contribute", &ck)).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(b.contains("contrib-v2")); assert!(b.contains("ne peut plus être retirée des modèles déjà entraînés"), "{b}");
+    assert!(!b.contains("<script"));
+    // L'ancien consentement n'est plus accepté pour une nouvelle soumission.
+    assert_eq!(send(&r, form("/contribute/submit", &ck, &sub(&c, BODY, ""))).await.0, StatusCode::BAD_REQUEST);
+    let v2 = format!("csrf={c}&kind=text&language=fon&body={}&attribution=Koami&consent=contrib-v2", urlencoding(BODY));
+    let (st, _, b, _) = send(&r, form("/contribute/submit", &ck, &v2)).await;
+    assert_eq!(st, StatusCode::OK, "{b}");
+    let (cid, _) = last_contrib(&pool, &uid).await;
+    let cv: String = sqlx::query_scalar("SELECT consent_version FROM contributions WHERE contribution_id=$1").bind(&cid).fetch_one(&pool).await.unwrap();
+    assert_eq!(cv, "contrib-v2");
+}

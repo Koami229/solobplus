@@ -1,0 +1,4 @@
+*
+!polyglot/solob-local-rs/Cargo.toml
+!polyglot/solob-local-rs/Cargo.lock
+!polyglot/solob-local-rs/src/**

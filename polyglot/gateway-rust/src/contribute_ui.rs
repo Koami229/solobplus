@@ -12,7 +12,18 @@ use std::collections::HashMap;
 pub const LANGUAGES: &[&str] = &["fon", "yo", "ha", "wo", "ig", "sw", "fr", "en"];
 pub const KINDS: &[&str] = &["text", "translation", "correction"];
 pub const REPORT_REASONS: &[&str] = &["toxic", "plagiarism", "personal_data", "spam", "wrong_language", "other"];
-pub const CONSENT_VERSION: &str = "contrib-v1";
+pub const CONSENT_VERSION: &str = "contrib-v2";
+/// Version de repli si la migration additive 008 n'est pas appliquée (texte contrib-v1 de 006, jamais modifié).
+pub const CONSENT_VERSION_FALLBACK: &str = "contrib-v1";
+/// Avertissement affiché sous le texte de consentement, quelle que soit la version en base.
+pub const TRAINING_NOTICE: &str = "Important : une contribution déjà utilisée pour entraîner un modèle ne peut plus être retirée des modèles déjà entraînés. Si vous la retirez, elle sera seulement exclue des entraînements futurs.";
+
+/// Version de consentement courante : contrib-v2 si 008 est appliquée, sinon contrib-v1.
+async fn current_consent(pool: &sqlx::PgPool) -> Result<(String, String), AppError> {
+    let r: Option<(String, String)> = sqlx::query_as("SELECT version, body FROM contribution_consent_texts WHERE version = ANY($1) ORDER BY version DESC LIMIT 1")
+        .bind(vec![CONSENT_VERSION.to_string(), CONSENT_VERSION_FALLBACK.to_string()]).fetch_optional(pool).await?;
+    r.ok_or_else(|| AppError::new(503, "MODULE_DISABLED", "Texte de consentement introuvable."))
+}
 /// Soumissions par utilisateur et par heure (anti-spam), en plus de 30 actions/minute.
 pub const SUBMIT_PER_HOUR: i32 = 10;
 const TITLE: &str = "SOLOB AI — Contribuer";
@@ -61,7 +72,7 @@ pub async fn ui_contribute(State(s): State<AppState>, hm: HeaderMap) -> Response
 async fn render(s: &AppState, hm: &HeaderMap, flash: Option<String>) -> Result<String, AppError> {
     let (u, tok) = session(s, hm).await?;
     let hid = hidden(s, &tok);
-    let consent: String = sqlx::query_scalar("SELECT body FROM contribution_consent_texts WHERE version=$1").bind(CONSENT_VERSION).fetch_one(&s.pool).await?;
+    let (cv, consent) = current_consent(&s.pool).await?;
     let points: i32 = sqlx::query_scalar("SELECT COALESCE((SELECT points FROM contributor_reputation WHERE user_id=$1),0)").bind(&u.id).fetch_one(&s.pool).await?;
     let mut out = flash.map(|m| format!("<div class=\"card ok\" role=\"status\">{}</div>", esc(&m))).unwrap_or_default();
     out += &format!("<div class=\"card\"><h2>Proposer un texte, une traduction ou une correction</h2>\
@@ -70,11 +81,11 @@ async fn render(s: &AppState, hm: &HeaderMap, flash: Option<String>) -> Result<S
 <label>Texte source (obligatoire pour une traduction ou une correction)<textarea name=\"source_text\" maxlength=\"4000\"></textarea></label>\
 <label>Votre contribution (10 à 8000 caractères)<textarea name=\"body\" required minlength=\"10\" maxlength=\"8000\"></textarea></label>\
 <label>Attribution (nom ou pseudonyme publié avec la licence)<input name=\"attribution\" required maxlength=\"120\"></label>\
-<fieldset><legend>Consentement ({v}, licence CC BY 4.0)</legend><p>{}</p>\
+<fieldset><legend>Consentement ({v}, licence CC BY 4.0)</legend><p>{}</p><p><strong>{}</strong></p>\
 <label><input type=\"checkbox\" name=\"consent\" value=\"{v}\" required> J'accepte ce texte de consentement et la licence CC BY 4.0.</label>\
 <label><input type=\"checkbox\" name=\"is_minor\" value=\"yes\"> J'ai moins de 18 ans.</label>\
 <label><input type=\"checkbox\" name=\"parental_consent\" value=\"yes\"> (Mineurs) Un parent ou tuteur légal a donné son accord.</label></fieldset>\
-<button>Envoyer pour double validation</button></form></div>", opts(KINDS), opts(LANGUAGES), esc(&consent), v = CONSENT_VERSION);
+<button>Envoyer pour double validation</button></form></div>", opts(KINDS), opts(LANGUAGES), esc(&consent), esc(TRAINING_NOTICE), v = esc(&cv));
     let rows = sqlx::query("SELECT contribution_id, kind, language, status, left(body, 80) AS excerpt, used_in_training_at IS NOT NULL AS trained \
                             FROM contributions WHERE contributor_id=$1 ORDER BY created_at DESC LIMIT 50").bind(&u.id).fetch_all(&s.pool).await?;
     out += &format!("<div class=\"card\"><h2>Mes contributions</h2><p>Réputation : {points} points.</p><table><tr><th>Id</th><th>Type</th><th>Langue</th><th>Statut</th><th>Extrait</th><th></th></tr>");
@@ -82,7 +93,7 @@ async fn render(s: &AppState, hm: &HeaderMap, flash: Option<String>) -> Result<S
         let id: String = r.get("contribution_id"); let st: String = r.get("status");
         let wd = if (st == "pending" || st == "approved") && !r.get::<bool, _>("trained") {
             format!("<form method=\"post\" action=\"/contribute/withdraw\">{hid}<input type=\"hidden\" name=\"contribution_id\" value=\"{}\"><button>Retirer</button></form>", esc(&id))
-        } else { String::new() };
+        } else if r.get::<bool, _>("trained") { "Déjà utilisée pour un entraînement : ne peut plus être retirée des modèles déjà entraînés.".to_string() } else { String::new() };
         out += &format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{wd}</td></tr>", esc(&id), esc(&r.get::<String, _>("kind")),
             esc(&r.get::<String, _>("language")), esc(&st), esc(&r.get::<String, _>("excerpt")));
     }
@@ -120,7 +131,8 @@ pub async fn ui_contribute_action(State(s): State<AppState>, Path(action): Path<
         let msg = match action.as_str() {
             "submit" => {
                 let (kind, lang, body, src, attr) = (g("kind"), g("language"), g("body"), g("source_text"), g("attribution"));
-                if g("consent") != CONSENT_VERSION {
+                let (cv, _) = current_consent(&s.pool).await?;
+                if g("consent") != cv {
                     audit::record(&s.pool, actor, "core", "AI_CONTRIBUTION_SUBMIT", "contribution", None, "DENIED", Some(&ip), json!({"reason": "no_consent"})).await;
                     return Err(AppError::new(400, "CONSENT_REQUIRED", "Le consentement explicite (CC BY 4.0) est obligatoire."));
                 }
@@ -149,14 +161,14 @@ pub async fn ui_contribute_action(State(s): State<AppState>, Path(action): Path<
                 else { payload["text"] = json!(body); }
                 sqlx::query("INSERT INTO ai_review_items(item_id, kind, language, source_ref, payload, required_reviews) VALUES ($1,$2,$3,$4,$5,2)")
                     .bind(&item).bind(rk).bind(&lang).bind(format!("contrib:{cid}")).bind(&payload).execute(&mut *tx).await?;
-                let prov = json!({"origin": "solob-plus-user-contribution", "channel": "gateway:/contribute", "consent_version": CONSENT_VERSION,
+                let prov = json!({"origin": "solob-plus-user-contribution", "channel": "gateway:/contribute", "consent_version": cv,
                                   "license": "CC-BY-4.0", "body_sha256": sha, "contributor_ref": crypto::sha256_hex(&u.id)});
                 sqlx::query("INSERT INTO contributions(contribution_id, contributor_id, kind, language, source_text, body, body_sha256, attribution, consent_version, consent_at, \
                              is_minor, parental_consent_at, review_item_id, provenance) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),$10,CASE WHEN $10 THEN NOW() END,$11,$12)")
                     .bind(&cid).bind(&u.id).bind(&kind).bind(&lang).bind(if src.is_empty() { None } else { Some(&src) }).bind(&body).bind(&sha).bind(&attr)
-                    .bind(CONSENT_VERSION).bind(minor).bind(&item).bind(&prov).execute(&mut *tx).await?;
-                sqlx::query("INSERT INTO contribution_consents(contribution_id, user_id, event, consent_version) VALUES ($1,$2,'GIVEN',$3)").bind(&cid).bind(&u.id).bind(CONSENT_VERSION).execute(&mut *tx).await?;
-                if minor { sqlx::query("INSERT INTO contribution_consents(contribution_id, user_id, event, consent_version) VALUES ($1,$2,'PARENTAL_GIVEN',$3)").bind(&cid).bind(&u.id).bind(CONSENT_VERSION).execute(&mut *tx).await?; }
+                    .bind(&cv).bind(minor).bind(&item).bind(&prov).execute(&mut *tx).await?;
+                sqlx::query("INSERT INTO contribution_consents(contribution_id, user_id, event, consent_version) VALUES ($1,$2,'GIVEN',$3)").bind(&cid).bind(&u.id).bind(&cv).execute(&mut *tx).await?;
+                if minor { sqlx::query("INSERT INTO contribution_consents(contribution_id, user_id, event, consent_version) VALUES ($1,$2,'PARENTAL_GIVEN',$3)").bind(&cid).bind(&u.id).bind(&cv).execute(&mut *tx).await?; }
                 sqlx::query("INSERT INTO ai_review_audit(actor_id, action, item_id, meta) VALUES ($1,'CONTRIBUTION_SUBMITTED',$2,$3)").bind(&u.id).bind(&item).bind(json!({"contribution_id": cid})).execute(&mut *tx).await?;
                 tx.commit().await?;
                 audit::record(&s.pool, actor, "core", "AI_CONTRIBUTION_SUBMIT", "contribution", Some(&cid), "SUCCESS", Some(&ip), json!({"language": lang, "kind": kind})).await;
@@ -172,7 +184,7 @@ pub async fn ui_contribute_action(State(s): State<AppState>, Path(action): Path<
                     audit::record(&s.pool, actor, "core", "AI_CONTRIBUTION_WITHDRAW", "contribution", Some(&cid), "DENIED", Some(&ip), json!({"reason": "not_owner"})).await;
                     return Err(AppError::new(403, "NOT_OWNER", "Vous ne pouvez retirer que vos propres contributions."));
                 }
-                if trained { return Err(AppError::new(409, "ALREADY_TRAINED", "Contribution déjà intégrée à un entraînement : retrait impossible.")); }
+                if trained { return Err(AppError::new(409, "ALREADY_TRAINED", "Contribution déjà utilisée pour entraîner un modèle : elle ne peut plus être retirée des modèles déjà entraînés. Elle reste tracée et sous licence.")); }
                 if st != "pending" && st != "approved" { return Err(AppError::new(409, "NOT_WITHDRAWABLE", "Contribution déjà close.")); }
                 sqlx::query("UPDATE contributions SET status='withdrawn', updated_at=NOW() WHERE contribution_id=$1").bind(&cid).execute(&mut *tx).await?;
                 if let Some(i) = &item { sqlx::query("UPDATE ai_review_items SET status='rejected', updated_at=NOW() WHERE item_id=$1 AND status IN ('pending','in_review','disputed')").bind(i).execute(&mut *tx).await?; }
@@ -180,7 +192,7 @@ pub async fn ui_contribute_action(State(s): State<AppState>, Path(action): Path<
                 sqlx::query("INSERT INTO ai_review_audit(actor_id, action, item_id, meta) VALUES ($1,'CONTRIBUTION_WITHDRAWN',$2,$3)").bind(&u.id).bind(&item).bind(json!({"contribution_id": cid})).execute(&mut *tx).await?;
                 tx.commit().await?;
                 audit::record(&s.pool, actor, "core", "AI_CONTRIBUTION_WITHDRAW", "contribution", Some(&cid), "SUCCESS", Some(&ip), json!({})).await;
-                "Contribution retirée : elle ne sera jamais exportée.".to_string()
+                "Contribution retirée : elle ne sera jamais exportée ni utilisée dans un entraînement futur.".to_string()
             }
             "report" => {
                 let (cid, reason, details) = (g("contribution_id"), g("reason"), g("details"));

@@ -154,10 +154,10 @@ jobs:
             echo "SERVICE_SECRET=$(openssl rand -hex 32)"; echo "APP_ENV=staging"; } > .env
           echo "SMOKE_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
       - name: Build all images with buildx (gateway Rust, School Python+C++, Business Java)
-        run: docker buildx bake --allow=fs.read=.. -f docker-compose.yml --load gateway school business
+        run: docker buildx bake --allow=fs.read=.. -f docker-compose.yml --load gateway school business solob-local
       - name: Images run as non-root and declare a HEALTHCHECK
         run: |
-          for i in gateway school business; do
+          for i in gateway school business solob-local; do
             u=$(docker image inspect solob-plus/$i:local --format '{{.Config.User}}')
             hc=$(docker image inspect solob-plus/$i:local --format '{{if .Config.Healthcheck}}yes{{end}}')
             echo "$i user=$u healthcheck=$hc"; [ -n "$u" ] && [ "$u" != root ] && [ "$u" != 0 ] && [ "$hc" = yes ]
@@ -206,3 +206,36 @@ jobs:
         with: {python-version: '3.12', cache: pip, cache-dependency-path: polyglot/solob-ai/requirements.in}
       - run: pip install -r requirements.in
       - run: python -m pytest -q
+
+  solob-local:
+    name: solob-local (Rust, candle) — parity vs PyTorch + API + School e2e
+    runs-on: ubuntu-latest
+    # sentencepiece-sys 0.11.3 vendors sentencepiece sources that miss <cstdint> for newer GCC (bookworm's GCC 12 is fine)
+    env: {CXXFLAGS: -include cstdint}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: polyglot/solob-local-rs}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+      - name: Reference stack (PyTorch CPU) for the parity fixture
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu sentencepiece==0.2.2 safetensors==0.8.0 numpy==2.5.4 pyyaml==6.0.3
+      - name: Export a random-init fixture (no real weights in CI)
+        working-directory: polyglot/solob-local-rs
+        run: python tools/export_weights.py --random-init --out "$RUNNER_TEMP/slfix"
+      - name: cargo test (parity logits <= 1e-4, tokenizer, greedy, API, limits, timeout)
+        working-directory: polyglot/solob-local-rs
+        env: {SOLOB_LOCAL_PARITY_DIRS: '${{ runner.temp }}/slfix'}
+        run: cargo test --locked --release -- --nocapture
+      - name: End-to-end with School's local_provider (loopback)
+        run: |
+          B=polyglot/solob-local-rs/target/release/solob-local
+          SOLOB_LOCAL_SERVE=1 SOLOB_LOCAL_BIND=127.0.0.1:8300 SOLOB_LOCAL_MODEL_DIR="$RUNNER_TEMP/slfix" $B > "$RUNNER_TEMP/sl.log" 2>&1 &
+          for n in $(seq 1 30); do SOLOB_LOCAL_BIND=127.0.0.1:8300 $B healthcheck && break; sleep 1; done
+          cd polyglot/school-python
+          SOLOB_LOCAL_ENABLED=1 SOLOB_LOCAL_URL=http://127.0.0.1:8300/generate python3 -c "
+          from solob_school import local_provider as l; r=l.generate('Bonjour le Bénin'); print(r)
+          assert r and r['model'].startswith('solob-local:') and r['completion_tokens']>=0"
+          cat "$RUNNER_TEMP/sl.log"; ! grep -q 'Bonjour' "$RUNNER_TEMP/sl.log"

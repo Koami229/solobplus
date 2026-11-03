@@ -110,6 +110,17 @@ pub async fn ui_school(State(s): State<AppState>, hm: HeaderMap) -> Result<Respo
 
 fn opt(f: &HashMap<String, String>, k: &str) -> Value { f.get(k).filter(|v| !v.trim().is_empty()).map(|v| json!(v)).unwrap_or(Value::Null) }
 
+/// Réponses du fournisseur expérimental solob-local : bandeau EXPÉRIMENTAL + brouillon du modèle clairement séparé.
+/// Le petit modèle (~3,4 M paramètres) ne produit pas de réponses pédagogiques fiables.
+fn experimental_block(ai: &Value) -> String {
+    let local = ai["experimental"].as_bool() == Some(true) || s_(ai, "provider") == "solob-local";
+    if !local { return String::new(); }
+    let draft = s_(&ai["data"], "localModelDraft");
+    format!("<div class=\"card warn\" role=\"note\"><p><strong>EXPÉRIMENTAL — brouillon du petit modèle SOLOB AI (solob-local), non évalué.</strong> \
+Ce texte n'est pas une réponse fiable ; seules les citations extraites du document le sont.</p><p><small>{}</small></p>\
+<details><summary>Brouillon brut du modèle (expérimental)</summary><pre>{}</pre></details></div>", esc(&s_(ai, "epistemicNotice")), esc(&draft))
+}
+
 fn result_card(action: &str, v: &Value, hidden: &str) -> Option<String> {
     match action {
         "explain" => { let d = &v["aiResult"]["data"];
@@ -118,7 +129,8 @@ fn result_card(action: &str, v: &Value, hidden: &str) -> Option<String> {
             let fb = if mid.is_empty() { String::new() } else { format!("<form method=\"post\" action=\"/school/feedback\">{hidden}<input type=\"hidden\" name=\"materialId\" value=\"{}\">\
 <label>Commentaire (facultatif)<textarea name=\"comment\" maxlength=\"2000\"></textarea></label>\
 <button name=\"helpful\" value=\"true\">Réponse utile</button> <button name=\"helpful\" value=\"false\">Pas utile</button></form>", esc(&mid)) };
-            Some(format!("<div class=\"card\"><h2>Explication (incertitude {})</h2><pre>{}</pre><ul>{tk}</ul>{fb}</div>", esc(&s_(&v["aiResult"], "uncertaintyLevel")), esc(&s_(d, "explanation")))) }
+            let xp = experimental_block(&v["aiResult"]);
+            Some(format!("<div class=\"card\"><h2>Explication (incertitude {})</h2>{xp}<pre>{}</pre><ul>{tk}</ul>{fb}</div>", esc(&s_(&v["aiResult"], "uncertaintyLevel")), esc(&s_(d, "explanation")))) }
         "feedback" => Some("<div class=\"card ok\"><p>Merci : votre avis aide à améliorer SOLOB AI.</p></div>".to_string()),
         "generate" => { let c = &v["studyMaterial"]["content_json"];
             let fc: String = c["flashcards"].as_array().map(|a| a.iter().map(|f| format!("<li><strong>{}</strong> : {}</li>", esc(&s_(f, "front")), esc(&s_(f, "back")))).collect()).unwrap_or_default();
@@ -188,4 +200,18 @@ pub async fn ui_school_upload(State(s): State<AppState>, hm: HeaderMap, mut mp: 
         "isTeacherResource": fields.get("isTeacherResource").map(|v| v == "true").unwrap_or(false)});
     let (st, v) = school_call(&s, &u, reqwest::Method::POST, "documents", Some(body)).await?;
     finish(&s, &u, &tok, "upload", st, v).await
+}
+
+#[cfg(test)]
+mod experimental_tests {
+    use super::*;
+    #[test]
+    fn local_provider_answers_are_labelled_experimental() {
+        let v = json!({"aiResult": {"provider": "solob-local", "experimental": true, "uncertaintyLevel": "HIGH", "epistemicNotice": "[EXPERIMENTAL]",
+            "data": {"explanation": "x", "keyTakeaways": [], "localModelDraft": "<b>draft</b>"}}, "material": {"id": ""}});
+        let h = result_card("explain", &v, "").unwrap();
+        assert!(h.contains("EXPÉRIMENTAL")); assert!(h.contains("&lt;b&gt;draft")); assert!(!h.contains("<b>draft"));
+        let demo = json!({"aiResult": {"provider": "mock", "uncertaintyLevel": "LOW", "data": {"explanation": "x"}}, "material": {"id": ""}});
+        assert!(!result_card("explain", &demo, "").unwrap().contains("EXPÉRIMENTAL"));
+    }
 }
