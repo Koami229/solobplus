@@ -90,3 +90,14 @@ async fn demo_question_is_escaped_and_not_stored() {
     assert!(b.contains("SOLOB AI n'est pas appelé"));
 }
 
+
+#[tokio::test]
+async fn https_mode_adds_hsts() {
+    let pool = sqlx::postgres::PgPoolOptions::new().connect_lazy("postgres://nobody:x@127.0.0.1:1/none").unwrap();
+    let mut cfg = Config::test_default(); cfg.https = true;
+    let r = app::router(app::AppState { pool, cfg: Arc::new(cfg), http: reqwest::Client::new() });
+    let (st, hm, _) = get(&r, "/demo").await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(hm["strict-transport-security"].to_str().unwrap().contains("max-age="));
+    assert!(!get(&router(), "/demo").await.1.contains_key("strict-transport-security"));
+}

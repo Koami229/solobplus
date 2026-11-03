@@ -106,7 +106,7 @@ pub fn security_headers(production: bool) -> Vec<(&'static str, String)> {
 }
 
 pub fn session_cookies(cfg: &Config, raw: &str, csrf: &str, max_age_s: i64) -> [HeaderValue; 2] {
-    let sec = if cfg.production { "; Secure" } else { "" };
+    let sec = if cfg.production || cfg.https { "; Secure" } else { "" };
     [
         HeaderValue::from_str(&format!("{SESSION_COOKIE}={raw}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_s}{sec}")).unwrap(),
         HeaderValue::from_str(&format!("{CSRF_COOKIE}={csrf}; Path=/; SameSite=Lax; Max-Age={max_age_s}{sec}")).unwrap(),
@@ -114,7 +114,7 @@ pub fn session_cookies(cfg: &Config, raw: &str, csrf: &str, max_age_s: i64) -> [
 }
 
 pub fn clear_cookies(cfg: &Config) -> [HeaderValue; 2] {
-    let sec = if cfg.production { "; Secure" } else { "" };
+    let sec = if cfg.production || cfg.https { "; Secure" } else { "" };
     [
         HeaderValue::from_str(&format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}")).unwrap(),
         HeaderValue::from_str(&format!("{CSRF_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0{sec}")).unwrap(),
@@ -159,6 +159,10 @@ mod tests {
         let dev = security_headers(false);
         assert!(!dev.iter().any(|(k, _)| *k == "strict-transport-security"));
         let p = security_headers(true);
+        let mut c = Config::test_default(); c.https = true;
+        assert!(session_cookies(&c, "a", "b", 10).iter().all(|v| v.to_str().unwrap().contains("; Secure")));
+        assert!(clear_cookies(&c).iter().all(|v| v.to_str().unwrap().contains("; Secure")));
+        assert!(session_cookies(&Config::test_default(), "a", "b", 10).iter().all(|v| !v.to_str().unwrap().contains("Secure")));
         assert!(p.iter().any(|(k, _)| *k == "strict-transport-security"));
         assert!(!content_security_policy(true).contains("unsafe-inline"));
     }

@@ -13,6 +13,9 @@ const PLACEHOLDERS: &[&str] = &[
 #[derive(Clone, Debug)]
 pub struct Config {
     pub production: bool,
+    /// Served to browsers over HTTPS (e.g. behind Cloudflare Tunnel) even outside production:
+    /// enables Secure cookies and HSTS. PUBLIC_HTTPS=true, implied by APP_ENV=production.
+    pub https: bool,
     pub session_secret: String,
     pub session_ttl_hours: i64,
     pub trust_proxy: bool,
@@ -89,8 +92,10 @@ impl Config {
         let (trust_proxy, trusted_proxy_secret) =
             validate_proxy(g("TRUST_PROXY").as_deref(), g("TRUSTED_PROXY_SECRET").as_deref(), production)?;
         let service_secret = validate_service_secret(g("SERVICE_SECRET").as_deref(), g("APP_ENV").as_deref())?;
+        let https = production || matches!(g("PUBLIC_HTTPS").map(|v| v.trim().to_lowercase()).as_deref(), Some("true" | "1"));
         Ok(Config {
             production,
+            https,
             session_secret,
             session_ttl_hours: g("SESSION_TTL_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),
             trust_proxy,
@@ -106,6 +111,7 @@ impl Config {
     pub fn test_default() -> Self {
         Config {
             production: false,
+            https: false,
             session_secret: "test-only-secret-0123456789abcdef0123456789abcdef".into(),
             session_ttl_hours: 168,
             trust_proxy: false,
