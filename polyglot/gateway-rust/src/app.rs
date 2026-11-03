@@ -53,6 +53,8 @@ pub fn router(state: AppState) -> Router {
         .route("/client/:action", post(crate::launch_ui::ui_client_action))
         .route("/account/deletion", get(crate::launch_ui::ui_deletion).post(crate::launch_ui::ui_deletion_post))
         .route("/search", get(crate::launch_ui::ui_search))
+        .route("/enterprise/quotes", get(crate::quotes_ui::ui_quotes))
+        .route("/enterprise/quotes/:action", post(crate::quotes_ui::ui_quotes_action))
         .route("/contribute", get(contribute_ui::ui_contribute))
         .route("/contribute/:action", post(contribute_ui::ui_contribute_action))
         .route("/demo", get(demo::hub))
