@@ -110,11 +110,16 @@ pub async fn ui_school(State(s): State<AppState>, hm: HeaderMap) -> Result<Respo
 
 fn opt(f: &HashMap<String, String>, k: &str) -> Value { f.get(k).filter(|v| !v.trim().is_empty()).map(|v| json!(v)).unwrap_or(Value::Null) }
 
-fn result_card(action: &str, v: &Value) -> Option<String> {
+fn result_card(action: &str, v: &Value, hidden: &str) -> Option<String> {
     match action {
         "explain" => { let d = &v["aiResult"]["data"];
             let tk: String = d["keyTakeaways"].as_array().map(|a| a.iter().map(|t| format!("<li>{}</li>", esc(t.as_str().unwrap_or("")))).collect()).unwrap_or_default();
-            Some(format!("<div class=\"card\"><h2>Explication (incertitude {})</h2><pre>{}</pre><ul>{tk}</ul></div>", esc(&s_(&v["aiResult"], "uncertaintyLevel")), esc(&s_(d, "explanation")))) }
+            let mid = s_(&v["material"], "id");
+            let fb = if mid.is_empty() { String::new() } else { format!("<form method=\"post\" action=\"/school/feedback\">{hidden}<input type=\"hidden\" name=\"materialId\" value=\"{}\">\
+<label>Commentaire (facultatif)<textarea name=\"comment\" maxlength=\"2000\"></textarea></label>\
+<button name=\"helpful\" value=\"true\">Réponse utile</button> <button name=\"helpful\" value=\"false\">Pas utile</button></form>", esc(&mid)) };
+            Some(format!("<div class=\"card\"><h2>Explication (incertitude {})</h2><pre>{}</pre><ul>{tk}</ul>{fb}</div>", esc(&s_(&v["aiResult"], "uncertaintyLevel")), esc(&s_(d, "explanation")))) }
+        "feedback" => Some("<div class=\"card ok\"><p>Merci : votre avis aide à améliorer SOLOB AI.</p></div>".to_string()),
         "generate" => { let c = &v["studyMaterial"]["content_json"];
             let fc: String = c["flashcards"].as_array().map(|a| a.iter().map(|f| format!("<li><strong>{}</strong> : {}</li>", esc(&s_(f, "front")), esc(&s_(f, "back")))).collect()).unwrap_or_default();
             Some(format!("<div class=\"card\"><h2>Fiche de révision</h2><p>{}</p><ul>{fc}</ul></div>", esc(&s_(c, "summary")))) }
@@ -130,7 +135,8 @@ async fn finish(s: &AppState, u: &rbac::AuthUser, tok: &str, action: &str, st: u
     let ok = (200..300).contains(&st);
     let msg = if ok { "Action effectuée.".to_string() } else {
         format!("Erreur {} : {}", s_(&v["error"], "code"), s_(&v["error"], "message")) };
-    let res = if ok { result_card(action, &v) } else { None };
+    let hid = format!("<input type=\"hidden\" name=\"csrf\" value=\"{}\">", esc(&crypto::derive_csrf_token(&s.cfg.session_secret, tok)));
+    let res = if ok { result_card(action, &v, &hid) } else { None };
     Ok(html(if ok { 200 } else { st }, render(s, u, tok, Some((ok, msg)), res).await?))
 }
 
@@ -141,7 +147,7 @@ async fn pre(s: &AppState, hm: &HeaderMap, csrf: &str) -> Result<(rbac::AuthUser
     Ok((u, tok))
 }
 
-/// Urlencoded School forms: profile, explain, generate, submit.
+/// Urlencoded School forms: profile, explain, generate, submit, feedback (« réponse utile »).
 pub async fn ui_school_action(State(s): State<AppState>, Path(action): Path<String>, hm: HeaderMap,
                               axum::Form(f): axum::Form<HashMap<String, String>>) -> Result<Response, AppError> {
     let (u, tok) = pre(&s, &hm, f.get("csrf").map(String::as_str).unwrap_or("")).await?;
@@ -153,6 +159,7 @@ pub async fn ui_school_action(State(s): State<AppState>, Path(action): Path<Stri
                         "materialType": opt(&f, "materialType"), "difficulty": opt(&f, "difficulty")})),
         "submit" => { let answers: serde_json::Map<String, Value> = f.iter().filter_map(|(k, v)| k.strip_prefix("answer_").map(|q| (q.to_string(), json!(v)))).collect();
                       ("submissions", json!({"exerciseId": f.get("exerciseId"), "answers": answers})) }
+        "feedback" => ("feedback", json!({"materialId": f.get("materialId"), "helpful": f.get("helpful").map(|v| v == "true"), "comment": f.get("comment").cloned().unwrap_or_default()})),
         _ => return Err(AppError::new(404, "UNKNOWN_ACTION", "Unknown School action.")),
     };
     let (st, v) = school_call(&s, &u, reqwest::Method::POST, path, Some(body)).await?;

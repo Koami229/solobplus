@@ -14,3 +14,4 @@ pub mod business_ui;
 pub mod admin;
 pub mod admin_ui;
 pub mod review_ui;
+pub mod contribute_ui;
