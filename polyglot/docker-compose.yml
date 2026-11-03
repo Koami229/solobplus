@@ -1,0 +1,59 @@
+# Local topology only — NOT DEPLOYED. Secrets come from an untracked .env file
+# (POSTGRES_PASSWORD, SESSION_SECRET, SERVICE_SECRET >= 32 chars); nothing secret is committed.
+# Usage: docker compose --env-file .env up --build   (gateway on http://127.0.0.1:8100)
+x-common: &common
+  restart: unless-stopped
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  networks: [internal]
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: solob
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: solob
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL","pg_isready -U solob"], interval: 5s, retries: 20}
+    networks: [internal]
+  gateway:   # Rust: auth, sessions, CSRF, RBAC, rate limit, admin, UI, reverse proxy
+    <<: *common
+    build: ./gateway-rust
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      SESSION_SECRET: ${SESSION_SECRET:?set in .env}
+      SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+      SCHOOL_SERVICE_URL: http://school:8101
+      BUSINESS_SERVICE_URL: http://business:8102
+      BIND_ADDR: 0.0.0.0:8100
+      PAYMENT_PROVIDER: disabled
+    ports: ["127.0.0.1:8100:8100"]
+    depends_on: {postgres: {condition: service_healthy}, school: {condition: service_started}, business: {condition: service_started}}
+  school:    # Python FastAPI + C++ grader — internal only
+    <<: *common
+    build: {context: ., dockerfile: school-python/Dockerfile}
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+    volumes: [storage:/data/storage]
+    tmpfs: [/tmp]
+    depends_on: {postgres: {condition: service_healthy}}
+  business:  # Java 21 — internal only
+    <<: *common
+    build: ./business-java
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://solob:${POSTGRES_PASSWORD}@postgres:5432/solob
+      SERVICE_SECRET: ${SERVICE_SECRET:?set in .env}
+      PAYMENT_PROVIDER: disabled
+    volumes: [storage:/data/storage]
+    tmpfs: [/tmp]
+    depends_on: {postgres: {condition: service_healthy}}
+networks:
+  internal: {}
+volumes:
+  pgdata: {}
+  storage: {}
