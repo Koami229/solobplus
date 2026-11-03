@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub struct AppState { pub pool: PgPool, pub cfg: Arc<Config>, pub http: reqwest::Client }
 
 pub fn router(state: AppState) -> Router {
-    let prod = state.cfg.production;
+    let prod = state.cfg.production || state.cfg.https; // HSTS + upgrade-insecure-requests whenever served over HTTPS
     Router::new()
         .route("/api/health", get(health))
         .route("/api/auth", get(me).post(auth_post))
