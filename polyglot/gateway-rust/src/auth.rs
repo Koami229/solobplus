@@ -106,6 +106,11 @@ pub async fn login(pool: &PgPool, cfg: &Config, email: Option<String>, password:
         return Err(invalid());
     }
     if !user.is_active { return Err(AppError::new(403, "ACCOUNT_DEACTIVATED", "Account is deactivated.")); }
+    if crypto::needs_rehash(&hash) {
+        // Migration transparente scrypt → Argon2id (le mot de passe en clair n'est disponible qu'ici).
+        let r = sqlx::query("UPDATE users SET password_hash=$2 WHERE id=$1 AND password_hash=$3").bind(&user.id).bind(crypto::hash_password(&pw)).bind(&hash).execute(pool).await;
+        if r.is_ok() { tracing::info!(user_id = %user.id, "password_rehashed_argon2id"); }
+    }
     let (raw, exp) = create_session(pool, cfg, &user.id, ip).await?;
     audit::record(pool, Some((&user.id, &user.role)), &user.pillar, "USER_LOGIN", "user", Some(&user.id), "SUCCESS", Some(ip), json!({})).await;
     Ok(SessionResult { csrf_token: crypto::derive_csrf_token(&cfg.session_secret, &raw), user, raw_token: raw, expires_at: exp })

@@ -44,6 +44,15 @@ pub fn router(state: AppState) -> Router {
         .route("/review", get(review_ui::ui_review))
         .route("/review/item/:id", get(review_ui::ui_review_item))
         .route("/review/:action", post(review_ui::ui_review_action))
+        .route("/school/exams", get(crate::launch_ui::ui_exams))
+        .route("/school/exams/attempt/:id", get(crate::launch_ui::ui_exam_attempt))
+        .route("/school/exams/:action", post(crate::launch_ui::ui_exam_action))
+        .route("/talent", get(crate::launch_ui::ui_talent))
+        .route("/talent/:action", post(crate::launch_ui::ui_talent_action))
+        .route("/client", get(crate::launch_ui::ui_client))
+        .route("/client/:action", post(crate::launch_ui::ui_client_action))
+        .route("/account/deletion", get(crate::launch_ui::ui_deletion).post(crate::launch_ui::ui_deletion_post))
+        .route("/search", get(crate::launch_ui::ui_search))
         .route("/contribute", get(contribute_ui::ui_contribute))
         .route("/contribute/:action", post(contribute_ui::ui_contribute_action))
         .route("/demo", get(demo::hub))
@@ -55,7 +64,10 @@ pub fn router(state: AppState) -> Router {
         .route("/static/home.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], demo::HOME_CSS) }))
         .route("/static/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], ui::CSS) }))
         .layer(middleware::from_fn(move |req: Request, next: Next| async move {
+            // Journal structuré (JSON) : méthode, chemin sans query string (aucun jeton ni donnée personnelle), statut, durée.
+            let (method, path, t0) = (req.method().clone(), req.uri().path().to_string(), std::time::Instant::now());
             let mut res = next.run(req).await;
+            tracing::info!(target: "http", method = %method, path = %path, status = res.status().as_u16(), latency_ms = t0.elapsed().as_millis() as u64, "request");
             for (k, v) in h::security_headers(prod) { res.headers_mut().insert(k, v.parse().unwrap()); }
             res.headers_mut().remove("x-powered-by");
             res
