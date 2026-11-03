@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Lint, build, tests (embedded PGlite)
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Generate ephemeral CI-only secret (never a real value)
+        run: echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          NODE_ENV: production
+      - run: npm test
+
+  external-postgres:
+    name: Tests against PostgreSQL 16 (DATABASE_URL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: solob_ci
+          POSTGRES_PASSWORD: solob_ci_only_password
+          POSTGRES_DB: solob_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U solob_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://solob_ci:solob_ci_only_password@localhost:5432/solob_ci
+      SOLOB_TEST_ALLOW_DESTRUCTIVE_DB_RESET: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Generate ephemeral CI-only secret (never a real value)
+        run: echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm test
