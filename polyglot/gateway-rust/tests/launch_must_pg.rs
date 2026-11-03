@@ -168,8 +168,9 @@ async fn c01_c02_client_request_call_booking_and_badged_shortlist() {
     assert_eq!(send(&r, form("/client/request", &ck, &format!("csrf={c}&need={need}&call_at={}", slot(0).replace("T10:00", "T20:00")))).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(send(&r, form("/client/request", &ck, &format!("csrf={c}&need=court&call_at={}", slot(0)))).await.0, StatusCode::BAD_REQUEST);
     // Demande + appel enregistrés, confirmation avec fuseau.
-    let (st, _, b) = send(&r, form("/client/request", &ck, &format!("csrf={c}&need={need}&skills=fon&call_at={}", slot(0)))).await;
-    assert_eq!(st, StatusCode::OK, "{b}"); assert!(b.contains("Appel de 15 min confirmé") && b.contains("10:00 (heure du Bénin, UTC+1)") && b.contains("09:00 UTC"));
+    let (st, _, b) = send(&r, form("/client/request", &ck, &format!("csrf={c}&need={need}&skills=fon&tz=-5&call_at={}", slot(0)))).await;
+    assert_eq!(st, StatusCode::OK, "{b}"); assert!(b.contains("Appel de 15 min confirmé") && b.contains("10:00 (heure du Bénin, UTC+1)") && b.contains("04:00 (UTC−5)") && b.contains("09:00 UTC"));
+    assert_eq!(send(&r, form("/client/request", &ck, &format!("csrf={c}&need={need}&tz=99&call_at={}", slot(3)))).await.0, StatusCode::BAD_REQUEST);
     // Double réservation du même créneau refusée.
     assert_eq!(send(&r, form("/client/request", &ck2, &format!("csrf={c2}&need={need}&call_at={}", slot(0)))).await.0, StatusCode::CONFLICT);
     let (st, _, _) = send(&r, form("/client/request", &ck2, &format!("csrf={c2}&need={need}&call_at={}", slot(1)))).await;

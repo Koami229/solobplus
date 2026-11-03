@@ -43,6 +43,13 @@ fn dbe(e: sqlx::Error) -> AppError {
     if m.contains("row-level security") { return AppError::new(403, "RLS_DENIED", "Accès refusé à cet espace."); }
     AppError::from(e)
 }
+/// Fuseau d'affichage du client (décalage entier en heures, −12…+14).
+pub fn parse_tz(v: &str) -> Result<i64, AppError> {
+    let h: i64 = if v.is_empty() { LOCAL_OFFSET_H } else { v.parse().map_err(|_| AppError::new(400, "INVALID_TZ", "Fuseau invalide."))? };
+    if !(-12..=14).contains(&h) { return Err(AppError::new(400, "INVALID_TZ", "Fuseau invalide.")); }
+    Ok(h)
+}
+pub fn in_tz(t: DateTime<Utc>, h: i64) -> String { format!("{} (UTC{}{})", (t + Duration::hours(h)).format("%d/%m/%Y %H:%M"), if h < 0 { "−" } else { "+" }, h.abs()) }
 pub fn local(t: DateTime<Utc>) -> String { (t + Duration::hours(LOCAL_OFFSET_H)).format("%d/%m/%Y %H:%M").to_string() + " (heure du Bénin, UTC+1)" }
 
 async fn enabled(s: &AppState) -> Result<(), AppError> {
@@ -367,14 +374,15 @@ async fn client_page(s: &AppState, u: &rbac::AuthUser, tok: &str, fl: Option<Str
     let staff = STAFF.contains(&u.role.as_str());
     let mut out = fl.map(|m| flash(&m)).unwrap_or_default();
     if !staff {
+        let tzo: String = (-12..=14).map(|h: i64| format!("<option value=\"{h}\"{}>UTC{}{}</option>", if h == LOCAL_OFFSET_H { " selected" } else { "" }, if h < 0 { "−" } else { "+" }, h.abs())).collect();
         out += &format!("<div class=\"card\"><h1>Décrire mon besoin</h1><form method=\"post\" action=\"/client/request\">{hid}\
 <label>Besoin (10 à 4000 caractères)<textarea name=\"need\" required minlength=\"10\" maxlength=\"4000\"></textarea></label>\
 <label>Compétences recherchées<input name=\"skills\" maxlength=\"300\"></label>\
 <label>Appel de 15 min — date et heure (heure du Bénin, UTC+1, lun.–ven. 09:00–16:45)<input type=\"datetime-local\" name=\"call_at\" step=\"900\" required></label>\
-<button type=\"submit\">Envoyer et réserver l'appel</button></form></div>");
+<label>Mon fuseau horaire (pour l'affichage)<select name=\"tz\">{tzo}</select></label><button type=\"submit\">Envoyer et réserver l'appel</button></form></div>");
     }
     let mut tx = rls_tx(s, u).await?;
-    let reqs = sqlx::query("SELECT request_id, client_id, need, skills, call_at, status FROM client_requests ORDER BY created_at DESC LIMIT 50").fetch_all(&mut *tx).await.map_err(dbe)?;
+    let reqs = sqlx::query("SELECT request_id, client_id, need, skills, call_at, client_tz, status FROM client_requests ORDER BY created_at DESC LIMIT 50").fetch_all(&mut *tx).await.map_err(dbe)?;
     let sl = sqlx::query("SELECT request_id, talent_user_id, note FROM client_shortlists ORDER BY created_at").fetch_all(&mut *tx).await.map_err(dbe)?;
     tx.commit().await?;
     let badged: Vec<(String, String, String)> = if staff {
@@ -384,7 +392,8 @@ async fn client_page(s: &AppState, u: &rbac::AuthUser, tok: &str, fl: Option<Str
     if reqs.is_empty() { out += "<p>Aucune demande.</p>"; }
     for r in reqs {
         let rid: String = r.get("request_id");
-        out += &format!("<div class=\"card\"><p><strong>Appel :</strong> {} — statut : {}</p><p>{}</p><p>Compétences : {}</p>", local(r.get("call_at")), esc(r.get("status")), esc(r.get("need")), esc(r.get("skills")));
+        let tz: i64 = r.get::<String, _>("client_tz").strip_prefix("UTC").and_then(|v| v.parse().ok()).unwrap_or(LOCAL_OFFSET_H);
+        out += &format!("<div class=\"card\"><p><strong>Appel :</strong> {} — fuseau du client : {} — statut : {}</p><p>{}</p><p>Compétences : {}</p>", local(r.get("call_at")), in_tz(r.get("call_at"), tz), esc(r.get("status")), esc(r.get("need")), esc(r.get("skills")));
         let mine: Vec<_> = sl.iter().filter(|x| x.get::<String, _>("request_id") == rid).collect();
         out += "<h3>Shortlist</h3>";
         if mine.is_empty() { out += "<p>En préparation.</p>"; }
@@ -428,11 +437,12 @@ pub async fn ui_client_action(State(s): State<AppState>, Path(action): Path<Stri
             if !(10..=4000).contains(&n) { return Err(AppError::new(400, "INVALID_NEED", "Décrivez le besoin (10 à 4000 caractères).")); }
             if g("skills").chars().count() > 300 { return Err(AppError::new(400, "INVALID_SKILLS", "Compétences : 300 caractères maximum.")); }
             let at = parse_slot(&g("call_at"), Utc::now())?;
+            let tz = parse_tz(&g("tz"))?;
             let id = crypto::create_id("creq");
-            sqlx::query("INSERT INTO client_requests(request_id, client_id, need, skills, call_at) VALUES ($1,$2,$3,$4,$5)")
-                .bind(&id).bind(&u.id).bind(&need).bind(g("skills")).bind(at).execute(&mut *tx).await.map_err(dbe)?;
+            sqlx::query("INSERT INTO client_requests(request_id, client_id, need, skills, call_at, client_tz) VALUES ($1,$2,$3,$4,$5,$6)")
+                .bind(&id).bind(&u.id).bind(&need).bind(g("skills")).bind(at).bind(format!("UTC{tz:+}")).execute(&mut *tx).await.map_err(dbe)?;
             audit::record(&s.pool, actor, "business", "CLIENT_REQUEST_CREATED", "client_request", Some(&id), "SUCCESS", Some(&ip), json!({"call_at": at.to_rfc3339()})).await;
-            format!("Demande enregistrée. Appel de 15 min confirmé le {} (soit {} UTC).", local(at), at.format("%d/%m/%Y %H:%M"))
+            format!("Demande enregistrée. Appel de 15 min confirmé le {} — dans votre fuseau : {} (soit {} UTC).", local(at), in_tz(at, tz), at.format("%d/%m/%Y %H:%M"))
         } else {
             if !staff {
                 audit::record(&s.pool, actor, "business", "CLIENT_SHORTLIST_ADD", "client_request", None, "DENIED", Some(&ip), json!({"reason": "role"})).await;
