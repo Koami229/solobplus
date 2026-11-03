@@ -35,3 +35,9 @@ pub fn pillar(title: &str, user: Option<&AuthUser>, denied: Option<String>) -> S
     };
     layout(title, &format!("<div class=\"card\"><h1>{}</h1>{body}</div>", esc(title)))
 }
+
+/// Signed-in strip shown on the public homepage (escaped values, CSRF-protected logout form).
+pub fn account_strip(u: &AuthUser, csrf: &str) -> String {
+    format!("<span>Connecté : <strong>{}</strong> ({}, pilier {})</span><a href=\"/school\">School</a><a href=\"/business\">Business</a><a href=\"/account\">Mon compte</a><form method=\"post\" action=\"/logout\" class=\"demo-logout\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><button>Se déconnecter</button></form>",
+        esc(&u.full_name), esc(&u.role), esc(&u.pillar), esc(csrf))
+}

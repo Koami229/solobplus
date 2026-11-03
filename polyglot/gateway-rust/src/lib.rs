@@ -9,6 +9,7 @@ pub mod http;
 pub mod rate_limit;
 pub mod rbac;
 pub mod ui;
+pub mod demo;
 pub mod school_ui;
 pub mod business_ui;
 pub mod admin;
