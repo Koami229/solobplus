@@ -226,7 +226,7 @@ pub async fn ui_exam_action(State(s): State<AppState>, Path(action): Path<String
 
 // ===================== T01 : parcours talent =====================
 const TA_T: &str = "SOLOB Business — Parcours talent";
-const TALENT_ROLES: &[&str] = &["contributor", "reviewer", "operator", "admin"];
+pub(crate) const TALENT_ROLES: &[&str] = &["contributor", "reviewer", "operator", "admin"];
 
 pub async fn ui_talent(State(s): State<AppState>, hm: HeaderMap) -> Response {
     let r: Result<String, AppError> = async { let (u, tok) = session(&s, &hm, TALENT_ROLES, "business", "TALENT_JOURNEY").await?; talent_page(&s, &u, &tok, None).await }.await;
@@ -288,7 +288,7 @@ async fn talent_page(s: &AppState, u: &rbac::AuthUser, tok: &str, fl: Option<Str
                 _ => "<p>Entretien envoyé — en attente de revue humaine.</p>".to_string() };
         }
     }
-    out += "</div><p><a href=\"/business\">Retour à Business</a></p>";
+    out += "</div><p><a href=\"/annotation\">Annotation audio (transcription, traduction)</a> · <a href=\"/business\">Retour à Business</a></p>";
     Ok(page(TA_T, &out))
 }
 
