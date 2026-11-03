@@ -11,7 +11,7 @@ const AI: &[&str] = &[
     include_str!("../../../db/migrations-ai/004_sakc.sql"), include_str!("../../../db/migrations-ai/005_human_review.sql"),
     include_str!("../../../db/migrations-ai/006_contributions.sql"), include_str!("../../../db/migrations-ai/007_training_usage.sql"),
     include_str!("../../../db/migrations-ai/008_consent_v2.sql"), include_str!("../../../db/migrations-ai/009_launch_must.sql"),
-    include_str!("../../../db/migrations-ai/010_quotes_school_annotation.sql"),
+    include_str!("../../../db/migrations-ai/010_quotes_school_annotation.sql"), include_str!("../../../db/migrations-ai/011_annotation_sources_rls.sql"),
 ];
 
 async fn fresh_db(with_009: bool) -> Option<PgPool> {

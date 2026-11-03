@@ -55,6 +55,8 @@ pub fn router(state: AppState) -> Router {
         .route("/search", get(crate::launch_ui::ui_search))
         .route("/enterprise/quotes", get(crate::quotes_ui::ui_quotes))
         .route("/enterprise/quotes/:action", post(crate::quotes_ui::ui_quotes_action))
+        .route("/annotation", get(crate::annotation_ui::ui_annotation))
+        .route("/annotation/:action", post(crate::annotation_ui::ui_annotation_action))
         .route("/contribute", get(contribute_ui::ui_contribute))
         .route("/contribute/:action", post(contribute_ui::ui_contribute_action))
         .route("/demo", get(demo::hub))
