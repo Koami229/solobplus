@@ -6,6 +6,8 @@ async fn main() {
     // `solob-gateway healthcheck`: container HEALTHCHECK for the distroless image (no shell/curl).
     // Runs before config/DB so it needs no secrets; exits 0 only on HTTP 200 from /api/health.
     if std::env::args().nth(1).as_deref() == Some("healthcheck") { std::process::exit(healthcheck()); }
+    tracing_subscriber::fmt().json().with_current_span(false).with_env_filter(
+        tracing_subscriber::EnvFilter::try_from_env("LOG_LEVEL").unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))).init();
     let cfg = Config::from_env().unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| { eprintln!("FATAL: DATABASE_URL is required."); std::process::exit(1) });
     let pool = sqlx::postgres::PgPoolOptions::new().max_connections(10).connect(&url).await.expect("database connection");

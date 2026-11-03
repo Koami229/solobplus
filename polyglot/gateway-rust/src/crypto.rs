@@ -30,13 +30,28 @@ fn scrypt_raw(password: &str, salt: &str, n: u64, r: u32, p: u32) -> Option<Vec<
     Some(out)
 }
 
+/// Nouveaux mots de passe : Argon2id (paramètres par défaut OWASP de la crate : m=19 MiB, t=2, p=1).
 pub fn hash_password(password: &str) -> String {
+    use argon2::password_hash::{PasswordHasher, SaltString};
+    let salt = SaltString::encode_b64(&hex::decode(random_hex(16)).expect("hex")).expect("salt");
+    argon2::Argon2::default().hash_password(password.as_bytes(), &salt).expect("argon2").to_string()
+}
+/// Un hash hérité (scrypt) doit être recalculé en Argon2id à la prochaine connexion réussie.
+pub fn needs_rehash(stored: &str) -> bool { !stored.starts_with("$argon2id$") }
+
+/// Format hérité scrypt (toujours accepté en vérification).
+pub fn hash_password_scrypt(password: &str) -> String {
     let salt = random_hex(16);
     let d = scrypt_raw(password, &salt, 1u64 << N_LOG2, R, P).expect("scrypt params valid");
     format!("scrypt${}${}${}${}${}", 1u64 << N_LOG2, R, P, salt, hex::encode(d))
 }
 
 pub fn verify_password(password: &str, stored: &str) -> bool {
+    if stored.starts_with("$argon2") {
+        use argon2::password_hash::{PasswordHash, PasswordVerifier};
+        let Ok(h) = PasswordHash::new(stored) else { return false };
+        return argon2::Argon2::default().verify_password(password.as_bytes(), &h).is_ok();
+    }
     let parts: Vec<&str> = stored.split('$').collect();
     if parts.len() != 6 || parts[0] != "scrypt" { return false; }
     let (Ok(n), Ok(r), Ok(p)) = (parts[1].parse::<u64>(), parts[2].parse::<u32>(), parts[3].parse::<u32>()) else { return false };
@@ -90,8 +105,14 @@ mod tests {
     #[test]
     fn password_roundtrip_and_format() {
         let h = hash_password("Sup3rSecret!");
-        assert!(h.starts_with("scrypt$16384$8$1$"));
+        assert!(h.starts_with("$argon2id$"));
+        assert!(!needs_rehash(&h));
         assert!(verify_password("Sup3rSecret!", &h));
+        assert!(!verify_password("wrong", &h));
+        let legacy = hash_password_scrypt("Sup3rSecret!");
+        assert!(legacy.starts_with("scrypt$16384$8$1$"));
+        assert!(needs_rehash(&legacy));
+        assert!(verify_password("Sup3rSecret!", &legacy));
         assert!(!verify_password("wrong", &h));
         assert!(!verify_password("x", "garbage"));
     }
