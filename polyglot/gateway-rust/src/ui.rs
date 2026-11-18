@@ -13,6 +13,7 @@ fn layout(title: &str, body: &str) -> String {
     format!("<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{t}</title><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><header><strong>SOLOB+</strong><a href=\"/\">Accueil</a><a href=\"/school\">School</a><a href=\"/business\">Business</a><a href=\"/admin\">Admin</a></header><main>{body}</main></body></html>", t = esc(title))
 }
 
+#[allow(dead_code)] // Maison publique : site.rs. Conservé pour les écrans qui s'appuient encore sur cette coquille.
 pub fn home(user: Option<&AuthUser>, csrf: Option<&str>) -> String {
     let who = match (user, csrf) {
         (Some(u), Some(c)) => format!("<p>Connecté : <strong>{}</strong> ({}, pilier {})</p><form method=\"post\" action=\"/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><button>Se déconnecter</button></form>",

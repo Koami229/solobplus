@@ -104,6 +104,7 @@ pub async fn render(s: &AppState, u: &rbac::AuthUser, tok: &str, flash: Option<(
 pub async fn ui_school(State(s): State<AppState>, hm: HeaderMap) -> Result<Response, AppError> {
     match session(&s, &hm).await {
         Ok((u, tok)) => Ok(html(200, render(&s, &u, &tok, None, None).await?)),
+        Err(e) if e.code == "UNAUTHENTICATED" => crate::site::school_gate(&s, &hm).await,
         Err(e) => Ok(html(e.status, crate::ui::pillar("SOLOB School", None, Some(e.message)))),
     }
 }

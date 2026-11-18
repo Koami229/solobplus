@@ -6,6 +6,7 @@ WORKDIR /src
 COPY db/migrations ./db/migrations
 COPY polyglot/gateway-rust/Cargo.toml polyglot/gateway-rust/Cargo.lock ./polyglot/gateway-rust/
 COPY polyglot/gateway-rust/src ./polyglot/gateway-rust/src
+COPY polyglot/gateway-rust/fonts ./polyglot/gateway-rust/fonts
 WORKDIR /src/polyglot/gateway-rust
 RUN cargo build --release --locked
 

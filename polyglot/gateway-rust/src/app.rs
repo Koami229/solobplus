@@ -1,5 +1,5 @@
 //! Router: Core API, reverse proxy to School (Python) / Business (Java), server-rendered UI.
-use crate::{admin, admin_ui, review_ui, contribute_ui, business_ui, school_ui, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
+use crate::{admin, admin_ui, review_ui, contribute_ui, business_ui, school_ui, site, audit, auth, config::Config, crypto, error::AppError, http as h, rate_limit, rbac, ui};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Request, State},
@@ -20,6 +20,7 @@ pub struct AppState { pub pool: PgPool, pub cfg: Arc<Config>, pub http: reqwest:
 pub fn router(state: AppState) -> Router {
     let prod = state.cfg.production;
     Router::new()
+        .merge(site::routes())
         .route("/api/health", get(health))
         .route("/api/auth", get(me).post(auth_post))
         .route("/api/admin/overview", get(admin_overview))
@@ -28,7 +29,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/school/*path", any(proxy_school).layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024)))
         .route("/api/files/:file_id", get(proxy_file))
         .route("/api/business/*path", any(proxy_business))
-        .route("/", get(ui_home))
         .route("/login", get(ui_login_page).post(ui_login))
         .route("/logout", post(ui_logout))
         .route("/school", get(school_ui::ui_school))
@@ -205,11 +205,6 @@ async fn proxy_business(State(s): State<AppState>, Path(p): Path<String>, m: Met
 // ---------------- server-rendered UI (no JavaScript) ----------------
 fn html(body: String) -> Response { ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response() }
 
-async fn ui_home(State(s): State<AppState>, hm: HeaderMap) -> Result<Response, AppError> {
-    let cu = current_user(&s, &hm).await?;
-    let csrf = cu.as_ref().map(|(_, t)| crypto::derive_csrf_token(&s.cfg.session_secret, t));
-    Ok(html(ui::home(cu.as_ref().map(|c| &c.0), csrf.as_deref())))
-}
 async fn ui_login_page() -> Response { html(ui::login(None)) }
 
 #[derive(Deserialize)]
