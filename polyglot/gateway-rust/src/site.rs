@@ -760,7 +760,7 @@ async fn done(
 ) -> Result<Response, AppError> {
     let issued = issue_csrf(&s.cfg, hm);
     let user = viewer(s, hm).await?;
-    let main = format!("<article class=\"sheet wrap\"><p class=\"status ok\">Enregistré</p><h1>{}</h1><p class=\"lede\">{}</p><p class=\"actions\"><a class=\"btn ghost\" href=\"/\">Retour à la maison</a></p></article>", crate::ui::esc(title), crate::ui::esc(text));
+    let main = format!("<article class=\"sheet done wrap\"><p class=\"status ok\">Enregistré</p><h1>{}</h1><p class=\"lede\">{}</p><p class=\"actions\"><a class=\"btn ghost\" href=\"/\">Retour à la maison</a></p></article>", crate::ui::esc(title), crate::ui::esc(text));
     Ok(page(
         StatusCode::OK,
         &s.cfg,
@@ -882,26 +882,25 @@ fn home_main() -> String {
     let mut index = String::from("<ol class=\"index\">");
     for (n, name, meta, href, status) in POLES {
         index.push_str(&format!(
-            "<li><a href=\"{href}\"><span class=\"n\">{n}</span><span>{name}</span><span class=\"meta\">{meta}</span><span class=\"{cls}\">{label}</span><span class=\"go\" aria-hidden=\"true\">→</span></a></li>",
+            "<li><a href=\"{href}\"><span class=\"n\">{n}</span><span class=\"name\">{name}</span><span class=\"meta\">{meta}</span><span class=\"{cls}\">{label}</span><span class=\"go\" aria-hidden=\"true\">→</span></a></li>",
             name = esc(name), meta = esc(meta), cls = status.class(), label = esc(status.label())));
     }
     index.push_str("</ol>");
-    let mut cards = String::new();
-    for (n, name, meta, href, _) in POLES {
-        cards.push_str(&format!("<article class=\"reveal\"><h3><a href=\"{href}\">{name}</a></h3><p>{n} — {meta}</p></article>", name = esc(name), meta = esc(meta)));
-    }
     format!(
         "<section class=\"hero\"><div class=\"wrap\">\
-<p class=\"eyebrow\">SOLOB · Porto-Novo</p>\
+<p class=\"brand-mark\" aria-label=\"SOLOB\">SOLOB</p>\
+<p class=\"eyebrow\">Porto-Novo · Bénin</p>\
 <h1>Une maison pour les langues, les talents et les données.</h1>\
 <p class=\"lede\">School forme. Staffing réunit des professionnels vérifiés. Core prépare les données qui entraînent et évaluent les modèles. Studio produit les images. Chez SOLOB, tous ne forment qu'un.</p>\
 <div class=\"actions\"><a class=\"btn\" href=\"/contact\">Demander un devis</a><a class=\"btn ghost\" href=\"/school\">Entrer dans School</a></div>\
 </div></section>\
-<section class=\"section poles\"><div class=\"wrap\">{index}</div></section>\
-<section class=\"section\"><div class=\"wrap\"><h2>Six pôles, une maison.</h2>\
+<section class=\"section poles\"><div class=\"wrap\">\
+<p class=\"section-kicker\">Les pôles</p>\
+{index}\
+</div></section>\
+<section class=\"section truth\"><div class=\"wrap narrow\">\
+<h2>Ce qui est vrai.</h2>\
 <p class=\"lede\">Chaque pôle a sa page, son statut, et un formulaire qui enregistre vraiment la demande.</p>\
-<div class=\"grid\">{cards}</div></div></section>\
-<section class=\"section\"><div class=\"wrap narrow\"><h2>Ce qui est vrai.</h2>\
 <p>School est gratuit. Il n'y a pas de paiement.</p>\
 <p>Studio, Staffing, Core et Trading se traitent sur devis. Aucun prix n'est publié.</p>\
 <p>Les langues d'Afrique de l'Ouest sont une spécialité de travail, pas un ornement. Une langue non vérifiée n'est pas présentée comme vérifiée.</p>\
@@ -917,12 +916,12 @@ fn offer_main(o: &Offer, csrf: &str, err: Option<&str>, draft: &Draft) -> String
             .iter()
             .map(|s| format!("<li>{}</li>", esc(s)))
             .collect();
-        format!("<section class=\"reveal\"><h2>Compétences</h2><ul class=\"skills\">{items}</ul></section>")
+        format!("<section class=\"reveal skills-block\"><h2>Compétences</h2><ul class=\"skills\">{items}</ul></section>")
     } else {
         String::new()
     };
     let candid = if o.code == "staffing" {
-        "<p class=\"actions\"><a class=\"btn ghost\" href=\"/staffing/candidater\">Proposer sa candidature</a></p>"
+        "<p class=\"actions reveal\"><a class=\"btn ghost\" href=\"/staffing/candidater\">Proposer sa candidature</a></p>"
     } else {
         ""
     };
@@ -971,11 +970,11 @@ fn quote_form(o: &Offer, csrf: &str, err: Option<&str>, draft: &Draft) -> String
     format!(
         "<form class=\"form form-{}\" method=\"post\" action=\"/contact\"><h2>{}</h2><p class=\"note\">{}</p>{err}\
 <input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"service\" value=\"{}\">\
-<p class=\"note\">Service : {}</p>\
+<p class=\"service-line\">Service · <strong>{}</strong></p>\
 <div class=\"hp\" aria-hidden=\"true\"><label>Site<input name=\"website\" tabindex=\"-1\" autocomplete=\"off\"></label></div>\
-<label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\"></label>\
-<label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\"></label>\
-<label>Organisation<input name=\"organization\" maxlength=\"160\" value=\"{}\"></label>\
+<div class=\"row\"><div><label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\" autocomplete=\"name\"></label></div>\
+<div><label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\" autocomplete=\"email\"></label></div></div>\
+<label>Organisation<input name=\"organization\" maxlength=\"160\" value=\"{}\" autocomplete=\"organization\"></label>\
 <label>Message<textarea name=\"message\" required minlength=\"10\" maxlength=\"4000\">{}</textarea></label>\
 <button class=\"btn\" type=\"submit\">Envoyer</button>\
 <p class=\"note\">Le message est conservé pour la réponse. <a href=\"/confidentialite\">Confidentialité</a>.</p></form>",
@@ -1007,11 +1006,12 @@ fn contact_main(csrf: &str, err: Option<&str>, draft: &Draft) -> String {
 <input type=\"hidden\" name=\"csrf\" value=\"{}\">\
 <div class=\"hp\" aria-hidden=\"true\"><label>Site<input name=\"website\" tabindex=\"-1\" autocomplete=\"off\"></label></div>\
 <label>Service<select name=\"service\" required>{options}</select></label>\
-<label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\"></label>\
-<label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\"></label>\
-<label>Organisation<input name=\"organization\" maxlength=\"160\" value=\"{}\"></label>\
+<div class=\"row\"><div><label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\" autocomplete=\"name\"></label></div>\
+<div><label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\" autocomplete=\"email\"></label></div></div>\
+<label>Organisation<input name=\"organization\" maxlength=\"160\" value=\"{}\" autocomplete=\"organization\"></label>\
 <label>Message<textarea name=\"message\" required minlength=\"10\" maxlength=\"4000\">{}</textarea></label>\
-<button class=\"btn\" type=\"submit\">Envoyer</button></form></div></article>",
+<button class=\"btn\" type=\"submit\">Envoyer</button>\
+<p class=\"note\"><a href=\"/confidentialite\">Confidentialité</a>.</p></form></div></article>",
         esc(csrf), esc(&draft.full_name), esc(&draft.email), esc(&draft.organization), esc(&draft.message))
 }
 
@@ -1043,8 +1043,8 @@ fn talent_main(csrf: &str, err: Option<&str>, draft: &Draft) -> String {
 <form class=\"form\" method=\"post\" action=\"/staffing/candidater\"><h2>Candidature</h2>{err}\
 <input type=\"hidden\" name=\"csrf\" value=\"{}\">\
 <div class=\"hp\" aria-hidden=\"true\"><label>Site<input name=\"website\" tabindex=\"-1\" autocomplete=\"off\"></label></div>\
-<label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\"></label>\
-<label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\"></label>\
+<div class=\"row\"><div><label>Nom<input name=\"full_name\" required maxlength=\"120\" value=\"{}\" autocomplete=\"name\"></label></div>\
+<div><label>E-mail<input name=\"email\" type=\"email\" required maxlength=\"200\" value=\"{}\" autocomplete=\"email\"></label></div></div>\
 <label>Ville ou pays<input name=\"organization\" maxlength=\"160\" value=\"{}\"></label>\
 <label>Langues<input name=\"languages\" required maxlength=\"200\" value=\"{}\"></label>\
 <label>Compétences<input name=\"skills\" required maxlength=\"500\" value=\"{}\"></label>\
@@ -1088,11 +1088,13 @@ fn document(title: &str, pole: &str, csrf: &str, user: Option<&AuthUser>, main: 
     };
     format!(
         "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<meta name=\"theme-color\" content=\"#090a0c\">\
+<meta name=\"description\" content=\"SOLOB — School, Staffing, Core, Studio. Une maison pour les langues, les talents et les données. Porto-Novo.\">\
 <title>{}</title><link rel=\"stylesheet\" href=\"/static/site.css\"></head><body>\
 <a class=\"skip\" href=\"#contenu\">Aller au contenu</a>\
 <header class=\"nav\"><a class=\"brand\" href=\"/\">SOLOB</a>{nav}{account}</header>\
 <main id=\"contenu\">{main}</main>\
-<footer class=\"foot wrap\"><p class=\"motto\">Chez SOLOB, tous ne forment qu'un.</p>\
+<footer class=\"foot wrap\"><div><p class=\"brand-foot\">SOLOB</p><p class=\"motto\">Chez SOLOB, tous ne forment qu'un.</p></div>\
 <nav><a href=\"/confidentialite\">Confidentialité</a><a href=\"/school\">School</a><a href=\"/business\">Espace Business</a><a href=\"/login\">Connexion</a></nav></footer>\
 </body></html>",
         esc(title)
@@ -1128,8 +1130,11 @@ mod tests {
         let low = html.to_lowercase();
         assert!(!low.contains("<script"));
         assert!(!html.contains("onclick"));
+        assert!(html.contains("class=\"brand-mark\""));
         assert!(html.contains("Une maison pour les langues, les talents et les données."));
         assert!(html.contains("Chez SOLOB, tous ne forment qu'un."));
+        assert!(html.contains("Ce qui est vrai."));
+        assert!(!html.contains("class=\"grid\""));
         for n in ["01", "02", "03", "04", "05", "06"] {
             assert!(html.contains(n), "{n}");
         }
