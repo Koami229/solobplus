@@ -6,6 +6,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial_schema.sql", include_str!("../../../db/migrations/001_initial_schema.sql")),
     ("002_security_hardening.sql", include_str!("../../../db/migrations/002_security_hardening.sql")),
     ("003_bootstrap_singleton.sql", include_str!("../../../db/migrations/003_bootstrap_singleton.sql")),
+    ("004_public_inquiries.sql", include_str!("../../../db/migrations/004_public_inquiries.sql")),
 ];
 
 pub async fn migrate(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {

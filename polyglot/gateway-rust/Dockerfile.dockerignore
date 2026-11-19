@@ -4,3 +4,4 @@
 !polyglot/gateway-rust/Cargo.toml
 !polyglot/gateway-rust/Cargo.lock
 !polyglot/gateway-rust/src/**
+!polyglot/gateway-rust/fonts/**

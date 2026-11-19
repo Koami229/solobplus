@@ -52,7 +52,7 @@ async fn migrations_are_idempotent() {
     let Some(pool) = fresh_db().await else { return };
     assert!(db::migrate(&pool).await.unwrap().is_empty());
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM schema_migrations").fetch_one(&pool).await.unwrap();
-    assert_eq!(n, 3);
+    assert_eq!(n, 4);
 }
 
 #[tokio::test]
@@ -212,5 +212,9 @@ async fn ui_pages_render_with_strict_headers() {
         assert!(!res.headers()["content-security-policy"].to_str().unwrap().contains("unsafe-inline"));
     }
     let res = r.clone().oneshot(Request::get("/school").body(Body::empty()).unwrap()).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    // Visiteur anonyme : porte publique. L'espace de travail reste derrière la session.
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(html.contains("gratuit"));
+    assert!(!html.contains("action=\"/school/profile\""));
 }

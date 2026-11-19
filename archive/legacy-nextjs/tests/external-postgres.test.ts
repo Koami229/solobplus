@@ -23,7 +23,12 @@ describe.skipIf(!enabled)('External PostgreSQL 16 integration (pg.Pool via DATAB
     expect(Number(v.rows[0].server_version_num)).toBeGreaterThanOrEqual(160000);
     expect(Number(v.rows[0].server_version_num)).toBeLessThan(170000);
     const migs = await db.query<{ version: string }>(`SELECT version FROM schema_migrations ORDER BY version`);
-    expect(migs.rows.map((r) => r.version)).toEqual(['001_initial_schema.sql', '002_security_hardening.sql', '003_bootstrap_singleton.sql']);
+    expect(migs.rows.map((r) => r.version)).toEqual([
+      '001_initial_schema.sql',
+      '002_security_hardening.sql',
+      '003_bootstrap_singleton.sql',
+      '004_public_inquiries.sql',
+    ]);
   });
 
   it('EXT-2 truly concurrent (10 pooled connections) rate limiting admits exactly max', async () => {
